@@ -40,6 +40,7 @@ export const DomainSettingsSchema = z.object({
   tieredCacheTopology: z.string().optional(),
   dnsRecords: z.array(DnsRecordSchema).optional(),
   pageRules: z.array(PageRuleSchema).optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 export type DomainSettings = z.infer<typeof DomainSettingsSchema>;
@@ -61,7 +62,8 @@ export type ConfigDomain = z.infer<typeof ConfigDomainSchema>;
 export const ConfigAccountSchema = z.object({
   id: z.string(),
   label: z.string().optional(),
-  email: z.string().email(),
+  authType: z.enum(["globalApiKey", "apiToken"]).default("globalApiKey"),
+  email: z.string().email().optional(),
   globalApiKeyEncrypted: z.string(),
   isActive: z.boolean().default(true),
   createdAt: z.string(),

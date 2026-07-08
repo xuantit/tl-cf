@@ -1,4 +1,5 @@
 import { app } from "./app.js";
+import { recoverInterruptedJobs } from "./services/jobRunner.js";
 import { env } from "./utils/env.js";
 import logger from "./utils/logger.js";
 
@@ -6,6 +7,7 @@ const port = env.PORT;
 
 async function start() {
   try {
+    await recoverInterruptedJobs();
     app.listen(port, () => {
       logger.info(`API listening on http://localhost:${port}`);
       logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);

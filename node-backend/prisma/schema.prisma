@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String              @id @default(uuid())
+  email        String              @unique
+  passwordHash String
+  role         String              @default("user")
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  cfAccounts   CloudflareAccount[]
+  dnsTemplates DnsTemplate[]
+}
+
+model CloudflareAccount {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label               String?
+  authType            String   @default("globalApiKey") // globalApiKey | apiToken
+  email               String?
+  credentialEncrypted String
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  domains             Domain[]
+
+  @@index([userId])
+}
+
+model Domain {
+  id           String            @id @default(uuid())
+  accountId    String
+  account      CloudflareAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name         String
+  zoneId       String?
+  status       String?           @default("active")
+  settingsJson String? // JSON-serialized DomainSettings
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([accountId])
+}
+
+model DnsTemplate {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  recordsJson String // JSON array of {type, name, content, ttl?, proxied?, priority?}
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model InviteCode {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  note      String?
+  maxUses   Int       @default(1)
+  usedCount Int       @default(0)
+  usedByJson String   @default("[]") // JSON array of emails that registered with this code
+  expiresAt DateTime?
+  createdBy String // admin userId
+  createdAt DateTime  @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  email     String?
+  method    String
+  path      String
+  status    Int
+  metaJson  String? // JSON body đã redact các field nhạy cảm
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+}
+
+model BulkJob {
+  id         String    @id
+  type       String // bulk-purge | bulk-delete | create-zones | dns-replace | apply-template
+  ownerId    String
+  status     String // running | done
+  total      Int
+  processed  Int       @default(0)
+  succeeded  Int       @default(0)
+  failed     Int       @default(0)
+  itemsJson  String // JSON array of BulkJobItem
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([ownerId, createdAt])
+}

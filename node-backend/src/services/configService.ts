@@ -1,246 +1,300 @@
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
-import { randomUUID } from "crypto";
+import bcrypt from "bcryptjs";
+
+import { prisma } from "./db.js";
 import logger from "../utils/logger.js";
-import {
+import { env } from "../utils/env.js";
+import type {
   ConfigFile,
   ConfigAccount,
   ConfigDomain,
   ConfigUser,
   DomainSettings,
-  DEFAULT_CONFIG,
-  ConfigFileSchema,
 } from "../models/configAccount.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+type PrismaUser = {
+  id: string;
+  email: string;
+  passwordHash: string;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
-// Config file path: ./config/accounts.json (relative to project root)
-const CONFIG_DIR = path.join(__dirname, "../../config");
-const CONFIG_FILE = path.join(CONFIG_DIR, "accounts.json");
-const BACKUP_DIR = path.join(CONFIG_DIR, "backups");
+type PrismaDomain = {
+  id: string;
+  accountId: string;
+  name: string;
+  zoneId: string | null;
+  status: string | null;
+  settingsJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type PrismaAccount = {
+  id: string;
+  label: string | null;
+  authType: string;
+  email: string | null;
+  credentialEncrypted: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  domains?: PrismaDomain[];
+};
+
+function mapUser(user: PrismaUser): ConfigUser {
+  return {
+    id: user.id,
+    email: user.email,
+    passwordHash: user.passwordHash,
+    role: user.role,
+    createdAt: user.createdAt.toISOString(),
+    updatedAt: user.updatedAt.toISOString(),
+  };
+}
+
+function mapDomain(domain: PrismaDomain): ConfigDomain {
+  let settings: DomainSettings | undefined;
+  if (domain.settingsJson) {
+    try {
+      settings = JSON.parse(domain.settingsJson) as DomainSettings;
+    } catch (error: any) {
+      logger.warn("Failed to parse domain settingsJson", { domainId: domain.id, error: error.message });
+    }
+  }
+  return {
+    id: domain.id,
+    name: domain.name,
+    zoneId: domain.zoneId ?? undefined,
+    status: domain.status ?? undefined,
+    settings,
+    createdAt: domain.createdAt.toISOString(),
+    updatedAt: domain.updatedAt.toISOString(),
+  };
+}
+
+function mapAccount(account: PrismaAccount): ConfigAccount {
+  return {
+    id: account.id,
+    label: account.label ?? undefined,
+    authType: (account.authType as "globalApiKey" | "apiToken") ?? "globalApiKey",
+    email: account.email ?? undefined,
+    globalApiKeyEncrypted: account.credentialEncrypted,
+    isActive: account.isActive,
+    createdAt: account.createdAt.toISOString(),
+    updatedAt: account.updatedAt.toISOString(),
+    domains: (account.domains ?? []).map(mapDomain),
+  };
+}
 
 class ConfigService {
-  private config: ConfigFile | null = null;
+  private adminSeeded = false;
 
-  /**
-   * Ensure config directory and backup directory exist
-   */
-  private async ensureDirectories(): Promise<void> {
-    try {
-      await fs.mkdir(CONFIG_DIR, { recursive: true });
-      await fs.mkdir(BACKUP_DIR, { recursive: true });
-    } catch (error: any) {
-      logger.error("Failed to create config directories", { error: error.message });
-      throw new Error(`Failed to create config directories: ${error.message}`);
+  private async ensureDefaultAdmin(): Promise<void> {
+    if (this.adminSeeded || !env.AUTO_SEED_DEFAULT_ADMIN) {
+      this.adminSeeded = true;
+      return;
     }
+
+    const userCount = await prisma.user.count();
+    if (userCount === 0) {
+      const passwordHash = await bcrypt.hash(env.DEFAULT_ADMIN_PASSWORD, 12);
+      await prisma.user.create({
+        data: {
+          email: env.DEFAULT_ADMIN_EMAIL,
+          passwordHash,
+          role: "admin",
+        },
+      });
+      logger.warn("Seeded default admin account because database had no users", {
+        email: env.DEFAULT_ADMIN_EMAIL,
+      });
+    }
+
+    this.adminSeeded = true;
   }
 
   /**
-   * Create backup of current config file
-   */
-  private async createBackup(): Promise<void> {
-    try {
-      const stats = await fs.stat(CONFIG_FILE).catch(() => null);
-      if (!stats) return; // No file to backup
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const backupFile = path.join(BACKUP_DIR, `accounts-${timestamp}.json`);
-      await fs.copyFile(CONFIG_FILE, backupFile);
-      logger.info("Created config backup", { backupFile });
-    } catch (error: any) {
-      logger.warn("Failed to create backup", { error: error.message });
-      // Don't throw - backup failure shouldn't block saves
-    }
-  }
-
-  /**
-   * Load config from file
+   * Ensure the database is ready (seed default admin if needed).
+   * Kept for backward compatibility with callers that expect a ConfigFile.
    */
   async loadConfig(): Promise<ConfigFile> {
-    try {
-      await this.ensureDirectories();
-
-      const data = await fs.readFile(CONFIG_FILE, "utf-8").catch(() => null);
-      if (!data) {
-        logger.info("Config file not found, creating default");
-        this.config = DEFAULT_CONFIG;
-        await this.saveConfig();
-        return this.config;
-      }
-
-      const parsed = JSON.parse(data);
-      // Ensure users array exists for backward compatibility
-      if (!parsed.users) {
-        parsed.users = [];
-      }
-      const validated = ConfigFileSchema.parse(parsed);
-      this.config = validated;
-      logger.info("Config loaded successfully", { 
-        usersCount: validated.users?.length || 0,
-        accountsCount: validated.accounts.length 
-      });
-      return validated;
-    } catch (error: any) {
-      logger.error("Failed to load config", { error: error.message });
-      if (error.name === "ZodError") {
-        throw new Error(`Invalid config file format: ${error.message}`);
-      }
-      throw new Error(`Failed to load config: ${error.message}`);
-    }
+    await this.ensureDefaultAdmin();
+    const [users, accounts] = await Promise.all([this.getAllUsers(), this.getAllAccounts()]);
+    return { version: "1.0", users, accounts };
   }
 
-  /**
-   * Save config to file with atomic write
-   */
+  /** No-op: writes are persisted immediately by Prisma. Retained for compatibility. */
   async saveConfig(): Promise<void> {
-    if (!this.config) {
-      throw new Error("No config loaded. Call loadConfig() first.");
-    }
-
-    try {
-      await this.ensureDirectories();
-      await this.createBackup();
-
-      // Atomic write: write to temp file first, then rename
-      const tempFile = `${CONFIG_FILE}.tmp`;
-      const jsonData = JSON.stringify(this.config, null, 2);
-      await fs.writeFile(tempFile, jsonData, "utf-8");
-      await fs.rename(tempFile, CONFIG_FILE);
-
-      // Set file permissions (read/write for owner only)
-      await fs.chmod(CONFIG_FILE, 0o600).catch(() => {
-        // chmod may fail on Windows, that's okay
-      });
-
-      logger.info("Config saved successfully", { accountsCount: this.config.accounts.length });
-    } catch (error: any) {
-      logger.error("Failed to save config", { error: error.message });
-      throw new Error(`Failed to save config: ${error.message}`);
-    }
+    // Intentionally empty — Prisma persists on each operation.
   }
 
-  /**
-   * Get config (load if not already loaded)
-   */
-  private async getConfig(): Promise<ConfigFile> {
-    if (!this.config) {
-      await this.loadConfig();
-    }
-    return this.config!;
-  }
-
-  /**
-   * Set config (for import functionality)
-   */
+  /** Replace the entire dataset (used for import). */
   async setConfig(config: ConfigFile): Promise<void> {
-    const validated = ConfigFileSchema.parse(config);
-    this.config = validated;
-    await this.saveConfig();
+    await prisma.$transaction(async (tx) => {
+      await tx.domain.deleteMany();
+      await tx.cloudflareAccount.deleteMany();
+      await tx.user.deleteMany();
+
+      for (const user of config.users) {
+        await tx.user.create({
+          data: {
+            id: user.id,
+            email: user.email,
+            passwordHash: user.passwordHash,
+            role: user.role,
+          },
+        });
+      }
+
+      // Legacy import format has no per-account owner: assign to the first admin (or first user)
+      const owner = config.users.find((u) => u.role === "admin") || config.users[0];
+      if (!owner && config.accounts.length > 0) {
+        throw new Error("Cannot import accounts without at least one user");
+      }
+
+      for (const account of config.accounts) {
+        await tx.cloudflareAccount.create({
+          data: {
+            id: account.id,
+            userId: owner.id,
+            label: account.label,
+            authType: account.authType ?? "globalApiKey",
+            email: account.email,
+            credentialEncrypted: account.globalApiKeyEncrypted,
+            isActive: account.isActive,
+            domains: {
+              create: (account.domains ?? []).map((d) => ({
+                id: d.id,
+                name: d.name,
+                zoneId: d.zoneId,
+                status: d.status,
+                settingsJson: d.settings ? JSON.stringify(d.settings) : null,
+              })),
+            },
+          },
+        });
+      }
+    });
+    logger.info("Config replaced via setConfig", {
+      users: config.users.length,
+      accounts: config.accounts.length,
+    });
   }
 
   // ========== Account Operations ==========
 
-  async getAllAccounts(): Promise<ConfigAccount[]> {
-    const config = await this.getConfig();
-    return config.accounts;
+  async getAllAccounts(userId?: string): Promise<ConfigAccount[]> {
+    const accounts = await prisma.cloudflareAccount.findMany({
+      where: userId ? { userId } : undefined,
+      include: { domains: true },
+      orderBy: { createdAt: "asc" },
+    });
+    return accounts.map(mapAccount);
   }
 
-  async getAccountById(id: string): Promise<ConfigAccount | null> {
-    const config = await this.getConfig();
-    return config.accounts.find((acc) => acc.id === id) || null;
+  async getAccountById(id: string, userId?: string): Promise<ConfigAccount | null> {
+    const account = await prisma.cloudflareAccount.findFirst({
+      where: { id, ...(userId ? { userId } : {}) },
+      include: { domains: true },
+    });
+    return account ? mapAccount(account) : null;
   }
 
-  async getAccountByLabel(label: string): Promise<ConfigAccount | null> {
-    const config = await this.getConfig();
-    return config.accounts.find((acc) => acc.label === label) || null;
+  async getAccountByLabel(label: string, userId?: string): Promise<ConfigAccount | null> {
+    const account = await prisma.cloudflareAccount.findFirst({
+      where: { label, ...(userId ? { userId } : {}) },
+      include: { domains: true },
+    });
+    return account ? mapAccount(account) : null;
   }
 
   async addAccount(accountData: {
+    userId: string;
     label?: string;
-    email: string;
+    email?: string;
+    authType?: "globalApiKey" | "apiToken";
     globalApiKeyEncrypted: string;
   }): Promise<ConfigAccount> {
-    const config = await this.getConfig();
-
-    const newAccount: ConfigAccount = {
-      id: randomUUID(),
-      label: accountData.label || `Account ${config.accounts.length + 1}`,
-      email: accountData.email,
-      globalApiKeyEncrypted: accountData.globalApiKeyEncrypted,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      domains: [],
-    };
-
-    config.accounts.push(newAccount);
-    await this.saveConfig();
-
-    logger.info("Account added", { accountId: newAccount.id, email: newAccount.email });
-    return newAccount;
+    const count = await prisma.cloudflareAccount.count({ where: { userId: accountData.userId } });
+    const account = await prisma.cloudflareAccount.create({
+      data: {
+        userId: accountData.userId,
+        label: accountData.label || `Account ${count + 1}`,
+        authType: accountData.authType || "globalApiKey",
+        email: accountData.email,
+        credentialEncrypted: accountData.globalApiKeyEncrypted,
+        isActive: true,
+      },
+      include: { domains: true },
+    });
+    logger.info("Account added", { accountId: account.id, email: account.email, userId: accountData.userId });
+    return mapAccount(account);
   }
 
-  async updateAccount(id: string, updates: Partial<ConfigAccount>): Promise<ConfigAccount> {
-    const config = await this.getConfig();
-    const accountIndex = config.accounts.findIndex((acc) => acc.id === id);
-
-    if (accountIndex === -1) {
+  async updateAccount(id: string, updates: Partial<ConfigAccount>, userId?: string): Promise<ConfigAccount> {
+    const existing = await prisma.cloudflareAccount.findFirst({
+      where: { id, ...(userId ? { userId } : {}) },
+    });
+    if (!existing) {
       throw new Error(`Account with id ${id} not found`);
     }
 
-    const updatedAccount: ConfigAccount = {
-      ...config.accounts[accountIndex],
-      ...updates,
-      id, // Prevent ID changes
-      updatedAt: new Date().toISOString(),
-    };
+    const data: Record<string, unknown> = {};
+    if (updates.label !== undefined) data.label = updates.label;
+    if (updates.authType !== undefined) data.authType = updates.authType;
+    if (updates.email !== undefined) data.email = updates.email;
+    if (updates.globalApiKeyEncrypted !== undefined) data.credentialEncrypted = updates.globalApiKeyEncrypted;
+    if (updates.isActive !== undefined) data.isActive = updates.isActive;
 
-    config.accounts[accountIndex] = updatedAccount;
-    await this.saveConfig();
-
+    const account = await prisma.cloudflareAccount.update({
+      where: { id },
+      data,
+      include: { domains: true },
+    });
     logger.info("Account updated", { accountId: id });
-    return updatedAccount;
+    return mapAccount(account);
   }
 
-  async deleteAccount(id: string): Promise<void> {
-    const config = await this.getConfig();
-    const accountIndex = config.accounts.findIndex((acc) => acc.id === id);
-
-    if (accountIndex === -1) {
+  async deleteAccount(id: string, userId?: string): Promise<void> {
+    const existing = await prisma.cloudflareAccount.findFirst({
+      where: { id, ...(userId ? { userId } : {}) },
+    });
+    if (!existing) {
       throw new Error(`Account with id ${id} not found`);
     }
-
-    config.accounts.splice(accountIndex, 1);
-    await this.saveConfig();
-
+    await prisma.cloudflareAccount.delete({ where: { id } });
     logger.info("Account deleted", { accountId: id });
   }
 
   // ========== Domain Operations ==========
 
   async getAllDomains(accountId: string): Promise<ConfigDomain[]> {
-    const account = await this.getAccountById(accountId);
+    const account = await prisma.cloudflareAccount.findUnique({ where: { id: accountId } });
     if (!account) {
       throw new Error(`Account with id ${accountId} not found`);
     }
-    return account.domains;
+    const domains = await prisma.domain.findMany({
+      where: { accountId },
+      orderBy: { createdAt: "asc" },
+    });
+    return domains.map(mapDomain);
   }
 
   async getDomainByZoneId(accountId: string, zoneId: string): Promise<ConfigDomain | null> {
-    const domains = await this.getAllDomains(accountId);
-    return domains.find((dom) => dom.zoneId === zoneId) || null;
+    const domain = await prisma.domain.findFirst({ where: { accountId, zoneId } });
+    return domain ? mapDomain(domain) : null;
   }
 
   async getDomainByName(accountId: string, name: string): Promise<ConfigDomain | null> {
-    const domains = await this.getAllDomains(accountId);
-    return domains.find((dom) => dom.name === name) || null;
+    const domain = await prisma.domain.findFirst({ where: { accountId, name } });
+    return domain ? mapDomain(domain) : null;
   }
 
   async getDomainById(accountId: string, domainId: string): Promise<ConfigDomain | null> {
-    const domains = await this.getAllDomains(accountId);
-    return domains.find((dom) => dom.id === domainId) || null;
+    const domain = await prisma.domain.findFirst({ where: { id: domainId, accountId } });
+    return domain ? mapDomain(domain) : null;
   }
 
   async addDomain(
@@ -252,28 +306,22 @@ class ConfigService {
       settings?: DomainSettings;
     }
   ): Promise<ConfigDomain> {
-    const config = await this.getConfig();
-    const accountIndex = config.accounts.findIndex((acc) => acc.id === accountId);
-
-    if (accountIndex === -1) {
+    const account = await prisma.cloudflareAccount.findUnique({ where: { id: accountId } });
+    if (!account) {
       throw new Error(`Account with id ${accountId} not found`);
     }
 
-    const newDomain: ConfigDomain = {
-      id: randomUUID(),
-      name: domainData.name,
-      zoneId: domainData.zoneId,
-      status: domainData.status || "active",
-      settings: domainData.settings,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    config.accounts[accountIndex].domains.push(newDomain);
-    await this.saveConfig();
-
-    logger.info("Domain added", { accountId, domainId: newDomain.id, name: newDomain.name });
-    return newDomain;
+    const domain = await prisma.domain.create({
+      data: {
+        accountId,
+        name: domainData.name,
+        zoneId: domainData.zoneId,
+        status: domainData.status || "active",
+        settingsJson: domainData.settings ? JSON.stringify(domainData.settings) : null,
+      },
+    });
+    logger.info("Domain added", { accountId, domainId: domain.id, name: domain.name });
+    return mapDomain(domain);
   }
 
   async updateDomain(
@@ -281,30 +329,25 @@ class ConfigService {
     domainId: string,
     updates: Partial<ConfigDomain>
   ): Promise<ConfigDomain> {
-    const config = await this.getConfig();
-    const accountIndex = config.accounts.findIndex((acc) => acc.id === accountId);
-
-    if (accountIndex === -1) {
-      throw new Error(`Account with id ${accountId} not found`);
-    }
-
-    const domainIndex = config.accounts[accountIndex].domains.findIndex((dom) => dom.id === domainId);
-    if (domainIndex === -1) {
+    const existing = await prisma.domain.findFirst({ where: { id: domainId, accountId } });
+    if (!existing) {
       throw new Error(`Domain with id ${domainId} not found in account ${accountId}`);
     }
 
-    const updatedDomain: ConfigDomain = {
-      ...config.accounts[accountIndex].domains[domainIndex],
-      ...updates,
-      id: domainId, // Prevent ID changes
-      updatedAt: new Date().toISOString(),
-    };
+    const data: Record<string, unknown> = {};
+    if (updates.name !== undefined) data.name = updates.name;
+    if (updates.zoneId !== undefined) data.zoneId = updates.zoneId;
+    if (updates.status !== undefined) data.status = updates.status;
+    if (updates.settings !== undefined) {
+      data.settingsJson = updates.settings ? JSON.stringify(updates.settings) : null;
+    }
 
-    config.accounts[accountIndex].domains[domainIndex] = updatedDomain;
-    await this.saveConfig();
-
+    const domain = await prisma.domain.update({
+      where: { id: domainId },
+      data,
+    });
     logger.info("Domain updated", { accountId, domainId });
-    return updatedDomain;
+    return mapDomain(domain);
   }
 
   async updateDomainSettings(
@@ -326,39 +369,29 @@ class ConfigService {
   }
 
   async deleteDomain(accountId: string, domainId: string): Promise<void> {
-    const config = await this.getConfig();
-    const accountIndex = config.accounts.findIndex((acc) => acc.id === accountId);
-
-    if (accountIndex === -1) {
-      throw new Error(`Account with id ${accountId} not found`);
-    }
-
-    const domainIndex = config.accounts[accountIndex].domains.findIndex((dom) => dom.id === domainId);
-    if (domainIndex === -1) {
+    const existing = await prisma.domain.findFirst({ where: { id: domainId, accountId } });
+    if (!existing) {
       throw new Error(`Domain with id ${domainId} not found in account ${accountId}`);
     }
-
-    config.accounts[accountIndex].domains.splice(domainIndex, 1);
-    await this.saveConfig();
-
+    await prisma.domain.delete({ where: { id: domainId } });
     logger.info("Domain deleted", { accountId, domainId });
   }
 
   // ========== User Operations (for tool authentication) ==========
 
   async getAllUsers(): Promise<ConfigUser[]> {
-    const config = await this.getConfig();
-    return config.users || [];
+    const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
+    return users.map(mapUser);
   }
 
   async getUserById(id: string): Promise<ConfigUser | null> {
-    const config = await this.getConfig();
-    return (config.users || []).find((user) => user.id === id) || null;
+    const user = await prisma.user.findUnique({ where: { id } });
+    return user ? mapUser(user) : null;
   }
 
   async getUserByEmail(email: string): Promise<ConfigUser | null> {
-    const config = await this.getConfig();
-    return (config.users || []).find((user) => user.email === email) || null;
+    const user = await prisma.user.findUnique({ where: { email } });
+    return user ? mapUser(user) : null;
   }
 
   async addUser(userData: {
@@ -366,66 +399,39 @@ class ConfigService {
     passwordHash: string;
     role?: string;
   }): Promise<ConfigUser> {
-    const config = await this.getConfig();
-
-    const newUser: ConfigUser = {
-      id: randomUUID(),
-      email: userData.email,
-      passwordHash: userData.passwordHash,
-      role: userData.role || "user",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (!config.users) {
-      config.users = [];
-    }
-    config.users.push(newUser);
-    await this.saveConfig();
-
-    logger.info("User added", { userId: newUser.id, email: newUser.email });
-    return newUser;
+    const user = await prisma.user.create({
+      data: {
+        email: userData.email,
+        passwordHash: userData.passwordHash,
+        role: userData.role || "user",
+      },
+    });
+    logger.info("User added", { userId: user.id, email: user.email });
+    return mapUser(user);
   }
 
   async updateUser(id: string, updates: Partial<ConfigUser>): Promise<ConfigUser> {
-    const config = await this.getConfig();
-    if (!config.users) {
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
       throw new Error(`User with id ${id} not found`);
     }
 
-    const userIndex = config.users.findIndex((user) => user.id === id);
-    if (userIndex === -1) {
-      throw new Error(`User with id ${id} not found`);
-    }
+    const data: Record<string, unknown> = {};
+    if (updates.email !== undefined) data.email = updates.email;
+    if (updates.passwordHash !== undefined) data.passwordHash = updates.passwordHash;
+    if (updates.role !== undefined) data.role = updates.role;
 
-    const updatedUser: ConfigUser = {
-      ...config.users[userIndex],
-      ...updates,
-      id, // Prevent ID changes
-      updatedAt: new Date().toISOString(),
-    };
-
-    config.users[userIndex] = updatedUser;
-    await this.saveConfig();
-
+    const user = await prisma.user.update({ where: { id }, data });
     logger.info("User updated", { userId: id });
-    return updatedUser;
+    return mapUser(user);
   }
 
   async deleteUser(id: string): Promise<void> {
-    const config = await this.getConfig();
-    if (!config.users) {
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
       throw new Error(`User with id ${id} not found`);
     }
-
-    const userIndex = config.users.findIndex((user) => user.id === id);
-    if (userIndex === -1) {
-      throw new Error(`User with id ${id} not found`);
-    }
-
-    config.users.splice(userIndex, 1);
-    await this.saveConfig();
-
+    await prisma.user.delete({ where: { id } });
     logger.info("User deleted", { userId: id });
   }
 }

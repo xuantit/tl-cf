@@ -11,10 +11,20 @@ export const domainsConfigRouter = Router();
 
 domainsConfigRouter.use(requireAuth);
 
+/** Returns true when the account exists and belongs to the user. */
+async function accountOwnedByUser(accountId: string, userId: string): Promise<boolean> {
+  const account = await configService.getAccountById(accountId, userId);
+  return !!account;
+}
+
 // List all domains for an account
 domainsConfigRouter.get("/accounts/:accountId/domains", async (req, res) => {
+  const auth = req.auth as AuthUser;
   try {
     await configService.loadConfig();
+    if (!(await accountOwnedByUser(req.params.accountId, auth.userId))) {
+      return res.status(404).json({ detail: "Account not found" });
+    }
     const domains = await configService.getAllDomains(req.params.accountId);
     res.json(domains);
   } catch (error: any) {
@@ -25,8 +35,12 @@ domainsConfigRouter.get("/accounts/:accountId/domains", async (req, res) => {
 
 // Get domain details and settings
 domainsConfigRouter.get("/accounts/:accountId/domains/:domainId", async (req, res) => {
+  const auth = req.auth as AuthUser;
   try {
     await configService.loadConfig();
+    if (!(await accountOwnedByUser(req.params.accountId, auth.userId))) {
+      return res.status(404).json({ detail: "Account not found" });
+    }
     const domain = await configService.getDomainById(req.params.accountId, req.params.domainId);
     if (!domain) {
       return res.status(404).json({ detail: "Domain not found" });
@@ -48,7 +62,7 @@ domainsConfigRouter.post("/accounts/:accountId/domains", async (req, res) => {
     const body = bodySchema.parse(req.body);
 
     await configService.loadConfig();
-    const account = await configService.getAccountById(req.params.accountId);
+    const account = await configService.getAccountById(req.params.accountId, auth.userId);
     if (!account) {
       return res.status(404).json({ detail: "Account not found" });
     }
@@ -101,6 +115,7 @@ domainsConfigRouter.post("/accounts/:accountId/domains", async (req, res) => {
 
 // Update domain settings
 domainsConfigRouter.put("/accounts/:accountId/domains/:domainId", async (req, res) => {
+  const auth = req.auth as AuthUser;
   try {
     const bodySchema = z.object({
       name: z.string().optional(),
@@ -110,6 +125,9 @@ domainsConfigRouter.put("/accounts/:accountId/domains/:domainId", async (req, re
     const body = bodySchema.parse(req.body);
 
     await configService.loadConfig();
+    if (!(await accountOwnedByUser(req.params.accountId, auth.userId))) {
+      return res.status(404).json({ detail: "Account not found" });
+    }
     const domain = await configService.updateDomain(req.params.accountId, req.params.domainId, body);
     res.json(domain);
   } catch (error: any) {
@@ -123,8 +141,12 @@ domainsConfigRouter.put("/accounts/:accountId/domains/:domainId", async (req, re
 
 // Delete domain from config
 domainsConfigRouter.delete("/accounts/:accountId/domains/:domainId", async (req, res) => {
+  const auth = req.auth as AuthUser;
   try {
     await configService.loadConfig();
+    if (!(await accountOwnedByUser(req.params.accountId, auth.userId))) {
+      return res.status(404).json({ detail: "Account not found" });
+    }
     await configService.deleteDomain(req.params.accountId, req.params.domainId);
     res.status(204).send();
   } catch (error: any) {
@@ -141,7 +163,7 @@ domainsConfigRouter.post("/accounts/:accountId/domains/:domainId/sync", async (r
   const auth = req.auth as AuthUser;
   try {
     await configService.loadConfig();
-    const account = await configService.getAccountById(req.params.accountId);
+    const account = await configService.getAccountById(req.params.accountId, auth.userId);
     if (!account) {
       return res.status(404).json({ detail: "Account not found" });
     }
@@ -198,6 +220,9 @@ domainsConfigRouter.post("/accounts/:accountId/domains/:domainId/apply", async (
   const auth = req.auth as AuthUser;
   try {
     await configService.loadConfig();
+    if (!(await accountOwnedByUser(req.params.accountId, auth.userId))) {
+      return res.status(404).json({ detail: "Account not found" });
+    }
     const domain = await configService.getDomainById(req.params.accountId, req.params.domainId);
     if (!domain || !domain.zoneId || !domain.settings) {
       return res.status(404).json({ detail: "Domain not found or missing settings" });

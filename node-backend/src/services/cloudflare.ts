@@ -1,14 +1,19 @@
 import axios, { AxiosInstance } from "axios";
 
+export type CloudflareAuthType = "globalApiKey" | "apiToken";
+
 export interface CloudflareCredentials {
-  email: string;
-  globalApiKey: string;
+  authType?: CloudflareAuthType;
+  email?: string;
+  globalApiKey?: string;
+  apiToken?: string;
 }
 
 export interface Zone {
   id: string;
   name: string;
   status: string;
+  nameServers?: string[];
   ssl?: {
     status: string;
     certificate_authority?: string;
@@ -36,6 +41,20 @@ export interface SslSettings {
   mode: string; // "off" | "flexible" | "full" | "strict"
 }
 
+export type ZoneSettingKey =
+  | "always_use_https"
+  | "automatic_https_rewrites"
+  | "security_level"
+  | "development_mode";
+
+export interface SecuritySettings {
+  always_use_https: string; // "on" | "off"
+  automatic_https_rewrites: string; // "on" | "off"
+  security_level: string; // "off" | "essentially_off" | "low" | "medium" | "high" | "under_attack"
+  development_mode: string; // "on" | "off"
+  development_mode_time_remaining?: number; // seconds left when "on"
+}
+
 export interface PageRule {
   id: string;
   priority: number;
@@ -46,23 +65,50 @@ export interface PageRule {
 
 class CloudflareService {
   private createClient(credentials: CloudflareCredentials): AxiosInstance {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (credentials.authType === "apiToken") {
+      if (!credentials.apiToken) {
+        throw new Error("API token is missing");
+      }
+      headers["Authorization"] = `Bearer ${credentials.apiToken}`;
+    } else {
+      if (!credentials.email || !credentials.globalApiKey) {
+        throw new Error("Global API Key credentials are missing");
+      }
+      headers["X-Auth-Email"] = credentials.email;
+      headers["X-Auth-Key"] = credentials.globalApiKey;
+    }
+
     return axios.create({
       baseURL: "https://api.cloudflare.com/client/v4",
-      headers: {
-        "X-Auth-Email": credentials.email,
-        "X-Auth-Key": credentials.globalApiKey,
-        "Content-Type": "application/json",
-      },
+      headers,
     });
+  }
+
+  /** Fetch every page of a paginated CF list endpoint. */
+  private async fetchAllPages(client: AxiosInstance, path: string, perPage: number): Promise<any[]> {
+    const results: any[] = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await client.get(path, { params: { page, per_page: perPage } });
+      if (!response.data.success) {
+        throw new Error(response.data.errors?.[0]?.message || `Failed to fetch ${path} from Cloudflare`);
+      }
+      results.push(...(response.data.result || []));
+      totalPages = response.data.result_info?.total_pages ?? 1;
+      page += 1;
+    } while (page <= totalPages);
+    return results;
   }
 
   async listZones(credentials: CloudflareCredentials): Promise<Zone[]> {
     const client = this.createClient(credentials);
-    const response = await client.get("/zones");
-    if (!response.data.success) {
-      throw new Error("Failed to fetch zones from Cloudflare");
-    }
-    return response.data.result.map((zone: any) => ({
+    const zones = await this.fetchAllPages(client, "/zones", 50);
+    return zones.map((zone: any) => ({
       id: zone.id,
       name: zone.name,
       status: zone.status,
@@ -71,6 +117,62 @@ class CloudflareService {
         certificate_authority: zone.ssl?.certificate_authority,
       },
     }));
+  }
+
+  async listAccounts(credentials: CloudflareCredentials): Promise<Array<{ id: string; name: string }>> {
+    const client = this.createClient(credentials);
+    const response = await client.get("/accounts");
+    if (!response.data.success) {
+      throw new Error(response.data.errors?.[0]?.message || "Failed to fetch Cloudflare accounts");
+    }
+    return (response.data.result || []).map((acc: any) => ({ id: acc.id, name: acc.name }));
+  }
+
+  async createZone(
+    credentials: CloudflareCredentials,
+    name: string,
+    accountId?: string,
+    jumpStart = false,
+  ): Promise<Zone> {
+    const client = this.createClient(credentials);
+
+    // Resolve the Cloudflare account id if not provided.
+    let cfAccountId = accountId;
+    if (!cfAccountId) {
+      const accounts = await this.listAccounts(credentials);
+      if (accounts.length === 0) {
+        throw new Error("No Cloudflare account available to create the zone in");
+      }
+      cfAccountId = accounts[0].id;
+    }
+
+    const response = await client.post("/zones", {
+      name,
+      account: { id: cfAccountId },
+      jump_start: jumpStart,
+    });
+    if (!response.data.success) {
+      throw new Error(response.data.errors?.[0]?.message || "Failed to create zone");
+    }
+    const zone = response.data.result;
+    return {
+      id: zone.id,
+      name: zone.name,
+      status: zone.status,
+      nameServers: zone.name_servers || [],
+      ssl: {
+        status: zone.ssl?.status || "unknown",
+        certificate_authority: zone.ssl?.certificate_authority,
+      },
+    };
+  }
+
+  async deleteZone(credentials: CloudflareCredentials, zoneId: string): Promise<void> {
+    const client = this.createClient(credentials);
+    const response = await client.delete(`/zones/${zoneId}`);
+    if (!response.data.success) {
+      throw new Error(response.data.errors?.[0]?.message || "Failed to delete zone");
+    }
   }
 
   async getZoneDetails(credentials: CloudflareCredentials, zoneId: string): Promise<Zone> {
@@ -93,11 +195,8 @@ class CloudflareService {
 
   async listDnsRecords(credentials: CloudflareCredentials, zoneId: string): Promise<DnsRecord[]> {
     const client = this.createClient(credentials);
-    const response = await client.get(`/zones/${zoneId}/dns_records`);
-    if (!response.data.success) {
-      throw new Error("Failed to fetch DNS records");
-    }
-    return response.data.result.map((record: any) => ({
+    const records = await this.fetchAllPages(client, `/zones/${zoneId}/dns_records`, 100);
+    return records.map((record: any) => ({
       id: record.id,
       type: record.type,
       name: record.name,
@@ -286,6 +385,51 @@ class CloudflareService {
     }
   }
 
+  async purgeCacheByUrls(credentials: CloudflareCredentials, zoneId: string, files: string[]): Promise<void> {
+    const client = this.createClient(credentials);
+    const response = await client.post(`/zones/${zoneId}/purge_cache`, { files });
+    if (!response.data.success) {
+      throw new Error(response.data.errors?.[0]?.message || "Failed to purge cache by URL");
+    }
+  }
+
+  async getSecuritySettings(credentials: CloudflareCredentials, zoneId: string): Promise<SecuritySettings> {
+    const client = this.createClient(credentials);
+    const keys: ZoneSettingKey[] = [
+      "always_use_https",
+      "automatic_https_rewrites",
+      "security_level",
+      "development_mode",
+    ];
+    const responses = await Promise.all(
+      keys.map((k) => client.get(`/zones/${zoneId}/settings/${k}`).catch(() => null)),
+    );
+    const resultOf = (i: number) =>
+      responses[i]?.data?.success ? responses[i]!.data.result : undefined;
+    const dev = resultOf(3);
+    return {
+      always_use_https: resultOf(0)?.value ?? "off",
+      automatic_https_rewrites: resultOf(1)?.value ?? "off",
+      security_level: resultOf(2)?.value ?? "medium",
+      development_mode: dev?.value ?? "off",
+      development_mode_time_remaining: dev?.time_remaining,
+    };
+  }
+
+  async updateZoneSetting(
+    credentials: CloudflareCredentials,
+    zoneId: string,
+    key: ZoneSettingKey,
+    value: string,
+  ): Promise<{ id: string; value: string }> {
+    const client = this.createClient(credentials);
+    const response = await client.patch(`/zones/${zoneId}/settings/${key}`, { value });
+    if (!response.data.success) {
+      throw new Error(response.data.errors?.[0]?.message || `Failed to update ${key}`);
+    }
+    return { id: response.data.result?.id ?? key, value: response.data.result?.value ?? value };
+  }
+
   async listPageRules(credentials: CloudflareCredentials, zoneId: string): Promise<PageRule[]> {
     const client = this.createClient(credentials);
     const response = await client.get(`/zones/${zoneId}/pagerules`);
@@ -325,8 +469,9 @@ class CloudflareService {
   async testConnection(credentials: CloudflareCredentials): Promise<boolean> {
     try {
       const client = this.createClient(credentials);
-      // Use /user endpoint instead of /user/tokens/verify for Global API Key
-      const response = await client.get("/user");
+      // API tokens are verified via /user/tokens/verify; Global API Key via /user
+      const endpoint = credentials.authType === "apiToken" ? "/user/tokens/verify" : "/user";
+      const response = await client.get(endpoint);
       return response.data.success === true;
     } catch (error: any) {
       // Log error details for debugging

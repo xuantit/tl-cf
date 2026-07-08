@@ -5,3 +5,8 @@ logs/
 *.log
 config/accounts.json
 config/backups/
+
+# Prisma / SQLite
+prisma/data/
+*.db
+*.db-journal

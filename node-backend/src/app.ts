@@ -5,10 +5,16 @@ import morgan from "morgan";
 
 import { env } from "./utils/env.js";
 import logger from "./utils/logger.js";
+import { auditMiddleware } from "./middleware/audit.js";
+import { auditRouter } from "./routes/audit.js";
 import { authRouter } from "./routes/auth.js";
 import { cfRouter } from "./routes/cf.js";
 import { domainsRouter } from "./routes/domains.js";
 import { domainsConfigRouter } from "./routes/domains-config.js";
+import { invitesRouter } from "./routes/invites.js";
+import { jobsRouter } from "./routes/jobs.js";
+import { templatesRouter } from "./routes/templates.js";
+import { usersRouter } from "./routes/users.js";
 
 export const app = express();
 
@@ -34,15 +40,22 @@ app.use(
 
 app.get("/health", (_req, res) => res.json({ status: "healthy" }));
 
+app.use(auditMiddleware);
+
+app.use("/api/audit", auditRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/cf", cfRouter);
 app.use("/api/domains", domainsRouter);
+app.use("/api/invites", invitesRouter);
+app.use("/api/jobs", jobsRouter);
+app.use("/api/templates", templatesRouter);
+app.use("/api/users", usersRouter);
 app.use("/api", domainsConfigRouter);
 
 // Error handler với logging chi tiết
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const error = err as Error;
-  
+
   logger.error("Unhandled error", {
     error: error.message,
     stack: error.stack,

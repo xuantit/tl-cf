@@ -1,61 +1,56 @@
-/* Global App Styles */
-
-.app-container {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
+/* Global App Styles — clean minimal */
 
 .auth-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
+  background-color: #f7f7f8;
+  background-image: radial-gradient(600px circle at 15% 20%, rgba(246, 130, 31, 0.08), transparent 60%),
+    radial-gradient(600px circle at 85% 80%, rgba(246, 130, 31, 0.06), transparent 60%);
+}
+
+body.dark .auth-container {
+  background-color: #101014;
+  background-image: radial-gradient(600px circle at 15% 20%, rgba(246, 130, 31, 0.1), transparent 60%),
+    radial-gradient(600px circle at 85% 80%, rgba(246, 130, 31, 0.1), transparent 60%);
 }
 
 .auth-card {
+  max-width: 400px;
   width: 100%;
-  max-width: 420px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 .page-header {
   margin-bottom: 24px;
 }
 
-.page-header h1 {
-  font-size: 28px;
-  font-weight: 600;
-  color: #1f1f1f;
-  margin-bottom: 8px;
+.stat-card {
+  cursor: default;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
-.page-header p {
-  color: #8c8c8c;
-  font-size: 14px;
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: #f6821f;
 }
 
-.stats-card {
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
+.icon-chip {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
 }
 
-.stats-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.stats-number {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1890ff;
-  margin: 8px 0;
-}
-
-.stats-label {
-  color: #8c8c8c;
-  font-size: 14px;
+.hover-row {
+  transition: background 0.15s ease;
+  cursor: pointer;
 }

@@ -1,25 +1,26 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Form, Input, Button, Card, Alert } from 'antd'
-import { UserOutlined, LockOutlined, CloudOutlined } from '@ant-design/icons'
+import { UserOutlined, LockOutlined, CloudOutlined, KeyOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
-import { useAuthStore } from '../stores/useAuthStore'
 import '../App.css'
 
 export default function Register() {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const navigate = useNavigate()
-  const setToken = useAuthStore((s) => s.setToken)
+  const [searchParams] = useSearchParams()
 
-  const onFinish = async (v: { email: string; password: string }) => {
+  const onFinish = async (v: { email: string; password: string; inviteCode: string }) => {
     setLoading(true)
     setErr('')
     try {
       await api.post('/auth/register', v)
       navigate('/login')
     } catch (e: unknown) {
-      setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Registration failed')
+      setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('Registration failed'))
     } finally {
       setLoading(false)
     }
@@ -27,13 +28,27 @@ export default function Register() {
 
   return (
     <div className="auth-container">
-      <Card className="auth-card" title={
-        <div style={{ textAlign: 'center', padding: '8px 0' }}>
-          <CloudOutlined style={{ fontSize: 32, color: '#1890ff', marginBottom: 8 }} />
-          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 8 }}>Create Account</div>
-          <div style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4 }}>Sign up to get started</div>
+      <Card className="auth-card">
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 14,
+              background: '#f6821f',
+              color: '#fff',
+              fontSize: 24,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <CloudOutlined />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{t('Create Account')}</div>
+          <div style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4 }}>{t('Sign up to get started')}</div>
         </div>
-      }>
         {err && (
           <Alert
             message={err}
@@ -44,42 +59,57 @@ export default function Register() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Form onFinish={onFinish} layout="vertical" size="large">
+        <Form
+          onFinish={onFinish}
+          layout="vertical"
+          size="large"
+          initialValues={{ inviteCode: searchParams.get('invite') || '' }}
+        >
+          <Form.Item
+            name="inviteCode"
+            label={t('Invite code')}
+            rules={[{ required: true, message: t('An invite code is required to sign up') }]}
+          >
+            <Input
+              prefix={<KeyOutlined style={{ color: '#bfbfbf' }} />}
+              placeholder="CF-XXXXX-XXXXX"
+            />
+          </Form.Item>
           <Form.Item
             name="email"
             label="Email"
             rules={[
-              { required: true, type: 'email', message: 'Please enter a valid email' },
-              { min: 5, message: 'Email must be at least 5 characters' }
+              { required: true, type: 'email', message: t('Please enter a valid email') },
+              { min: 5, message: t('Email must be at least 5 characters') }
             ]}
           >
             <Input
-              prefix={<UserOutlined />}
+              prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
               placeholder="your-email@example.com"
             />
           </Form.Item>
           <Form.Item
             name="password"
-            label="Password"
+            label={t('Password')}
             rules={[
-              { required: true, message: 'Please enter your password' },
-              { min: 8, message: 'Password must be at least 8 characters' }
+              { required: true, message: t('Please enter your password') },
+              { min: 8, message: t('Password must be at least 8 characters') }
             ]}
           >
             <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="At least 8 characters"
+              prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
+              placeholder={t('At least 8 characters')}
             />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block size="large">
-              Create Account
+            <Button type="primary" htmlType="submit" loading={loading} block size="large" style={{ height: 44, fontWeight: 600 }}>
+              {t('Create Account')}
             </Button>
           </Form.Item>
         </Form>
         <div style={{ textAlign: 'center', marginTop: 16, color: '#8c8c8c' }}>
-          Already have an account?{' '}
-          <Link to="/login" style={{ fontWeight: 500 }}>Sign in</Link>
+          {t('Already have an account?')}{' '}
+          <Link to="/login" style={{ fontWeight: 500 }}>{t('Sign in')}</Link>
         </div>
       </Card>
     </div>

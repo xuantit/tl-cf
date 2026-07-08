@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Form, Input, Button, Card, Alert } from 'antd'
 import { UserOutlined, LockOutlined, CloudOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/useAuthStore'
 import '../App.css'
 
 export default function Login() {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const navigate = useNavigate()
@@ -20,10 +22,20 @@ export default function Login() {
       setToken(data.token)
       navigate('/')
     } catch (e: unknown) {
-      const ex = e as { response?: { data?: { detail?: string | string[] }; status?: number }; message?: string }
+      const ex = e as {
+        response?: { data?: { detail?: string | Array<string | { msg?: string }>; title?: string }; status?: number }
+        message?: string
+      }
       const d = ex?.response?.data?.detail
-      const msg = typeof d === 'string' ? d : Array.isArray(d) ? d.map((x: { msg?: string }) => x?.msg).filter(Boolean).join(', ') : null
-      setErr(msg || ex?.response?.data?.title || ex?.message || 'Login failed')
+      const msg = typeof d === 'string'
+        ? d
+        : Array.isArray(d)
+          ? d
+            .map((item) => typeof item === 'string' ? item : item?.msg)
+            .filter((item): item is string => Boolean(item))
+            .join(', ')
+          : null
+      setErr(msg || ex?.response?.data?.title || ex?.message || t('Login failed'))
     } finally {
       setLoading(false)
     }
@@ -31,13 +43,27 @@ export default function Login() {
 
   return (
     <div className="auth-container">
-      <Card className="auth-card" title={
-        <div style={{ textAlign: 'center', padding: '8px 0' }}>
-          <CloudOutlined style={{ fontSize: 32, color: '#1890ff', marginBottom: 8 }} />
-          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 8 }}>Cloudflare Tool</div>
-          <div style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4 }}>Sign in to your account</div>
+      <Card className="auth-card">
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 14,
+              background: '#f6821f',
+              color: '#fff',
+              fontSize: 24,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <CloudOutlined />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Cloudflare Tool</div>
+          <div style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4 }}>{t('Sign in to your account')}</div>
         </div>
-      }>
         {err && (
           <Alert
             message={err}
@@ -52,32 +78,32 @@ export default function Login() {
           <Form.Item
             name="email"
             label="Email"
-            rules={[{ required: true, type: 'email', message: 'Please enter a valid email' }]}
+            rules={[{ required: true, type: 'email', message: t('Please enter a valid email') }]}
           >
             <Input
-              prefix={<UserOutlined />}
+              prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
               placeholder="your-email@example.com"
             />
           </Form.Item>
           <Form.Item
             name="password"
-            label="Password"
-            rules={[{ required: true, message: 'Please enter your password' }]}
+            label={t('Password')}
+            rules={[{ required: true, message: t('Please enter your password') }]}
           >
             <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="Enter your password"
+              prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
+              placeholder={t('Enter your password')}
             />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block size="large">
-              Sign In
+            <Button type="primary" htmlType="submit" loading={loading} block size="large" style={{ height: 44, fontWeight: 600 }}>
+              {t('Sign In')}
             </Button>
           </Form.Item>
         </Form>
         <div style={{ textAlign: 'center', marginTop: 16, color: '#8c8c8c' }}>
-          Don&apos;t have an account?{' '}
-          <Link to="/register" style={{ fontWeight: 500 }}>Sign up</Link>
+          {t("Don't have an account?")}{' '}
+          <Link to="/register" style={{ fontWeight: 500 }}>{t('Sign up')}</Link>
         </div>
       </Card>
     </div>
