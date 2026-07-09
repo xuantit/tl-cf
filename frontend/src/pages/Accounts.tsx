@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Table, Button, Form, Input, Modal, message, Segmented, Tag, Space, Popconfirm, Typography } from 'antd'
+import { Card, Table, Button, Form, Input, Modal, message, Segmented, Tag, Space, Popconfirm, Typography, Alert } from 'antd'
 import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined, CloudServerOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -174,6 +174,50 @@ export default function Accounts() {
           ]}
           style={{ marginBottom: 16 }}
         />
+        {authType === 'apiToken' ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={t('How to get an API Token')}
+            description={
+              <ol style={{ paddingLeft: 18, margin: 0 }}>
+                <li>
+                  {t('Open')}{' '}
+                  <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
+                    dash.cloudflare.com/profile/api-tokens
+                  </Typography.Link>
+                </li>
+                <li>{t('Click "Create Token" → use the "Edit zone DNS" template (or Custom token)')}</li>
+                <li>{t('Grant permissions: Zone → DNS → Edit, and Zone → Zone → Read')}</li>
+                <li>{t('Under "Zone Resources" choose All zones (or specific zones)')}</li>
+                <li>{t('Click "Continue to summary" → "Create Token", then copy the token')}</li>
+                <li>{t('Paste the token below (it is shown only once by Cloudflare)')}</li>
+              </ol>
+            }
+          />
+        ) : (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={t('How to get your Global API Key')}
+            description={
+              <ol style={{ paddingLeft: 18, margin: 0 }}>
+                <li>
+                  {t('Open')}{' '}
+                  <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
+                    dash.cloudflare.com/profile/api-tokens
+                  </Typography.Link>
+                </li>
+                <li>{t('In the "API Keys" section, next to "Global API Key" click "View"')}</li>
+                <li>{t('Confirm your password to reveal the key, then copy it')}</li>
+                <li>{t('Enter the email of your Cloudflare account together with the key below')}</li>
+                <li>{t('Note: the Global API Key has full account access — prefer an API Token when possible')}</li>
+              </ol>
+            }
+          />
+        )}
         <Form form={form} layout="vertical" onFinish={(v) => create.mutate(v)}>
           <Form.Item name="label" label={t('Friendly name')}>
             <Input placeholder={t('e.g. Main account')} />
