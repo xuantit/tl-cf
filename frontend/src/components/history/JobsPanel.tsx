@@ -4,11 +4,11 @@ import { EyeOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api } from '../services/api'
-import type { BulkJob } from '../hooks/useJobPolling'
-import BulkProgressModal from '../components/BulkProgressModal'
+import { api } from '../../services/api'
+import type { BulkJob } from '../../hooks/useJobPolling'
+import BulkProgressModal from '../BulkProgressModal'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const TYPE_LABELS: Record<string, string> = {
   'bulk-purge': 'Bulk purge cache job',
@@ -24,7 +24,7 @@ const STATUS_TAG: Record<BulkJob['status'], { color: string; label: string }> = 
   interrupted: { color: 'warning', label: 'Interrupted' },
 }
 
-export default function Jobs() {
+export default function JobsPanel() {
   const { t, i18n } = useTranslation()
   const dateLocale = i18n.language === 'vi' ? 'vi-VN' : 'en-US'
   const [searchParams, setSearchParams] = useSearchParams()
@@ -59,7 +59,7 @@ export default function Jobs() {
       width: 130,
       render: (status: BulkJob['status']) => {
         const cfg = STATUS_TAG[status]
-        return <Tag color={cfg.color} bordered={false}>{t(cfg.label)}</Tag>
+        return <Tag color={cfg.color} variant="filled">{t(cfg.label)}</Tag>
       },
     },
     {
@@ -67,7 +67,7 @@ export default function Jobs() {
       key: 'progress',
       width: 220,
       render: (_: unknown, job: BulkJob) => (
-        <Space direction="vertical" size={0} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={0} style={{ width: '100%' }}>
           <Progress
             percent={job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0}
             size="small"
@@ -104,32 +104,25 @@ export default function Jobs() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
-      <div className="page-header">
-        <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
-          {t('Jobs history')}
-        </Title>
-        <Text type="secondary">{t('Results of bulk operations (purge, delete, create domains, DNS replace, apply template)')}</Text>
-      </div>
-      <Card>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => refetch()}
-          loading={isFetching}
-          style={{ marginBottom: 16 }}
-        >
-          {t('Refresh')}
-        </Button>
-        <Table
-          loading={isLoading}
-          dataSource={jobs}
-          rowKey="id"
-          columns={columns}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        />
-      </Card>
+    <Card>
+      <Button
+        icon={<ReloadOutlined />}
+        onClick={() => refetch()}
+        loading={isFetching}
+        style={{ marginBottom: 16 }}
+      >
+        {t('Refresh')}
+      </Button>
+      <Table
+        loading={isLoading}
+        dataSource={jobs}
+        rowKey="id"
+        columns={columns}
+        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        scroll={{ x: 'max-content' }}
+      />
 
       <BulkProgressModal jobId={jobId} open={!!jobId} onClose={() => setJobParam(null)} />
-    </div>
+    </Card>
   )
 }

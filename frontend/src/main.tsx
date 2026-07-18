@@ -23,7 +23,7 @@ function ThemedApp() {
   const { i18n } = useTranslation()
 
   useEffect(() => {
-    document.body.style.background = dark ? '#101014' : '#f7f7f8'
+    document.body.style.background = dark ? '#0a0a0a' : '#ffffff'
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
     document.body.classList.toggle('dark', dark)
   }, [dark])
@@ -35,15 +35,31 @@ function ThemedApp() {
         algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
           colorPrimary: '#f6821f',
-          borderRadius: 10,
+          colorLink: '#0070f3',
+          // Vercel-style: tight radius family, borders over shadows
+          borderRadius: 6,
+          borderRadiusLG: 8,
+          borderRadiusSM: 4,
           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          colorBgLayout: dark ? '#101014' : '#f7f7f8',
-          colorBgContainer: dark ? '#17171c' : '#ffffff',
-          colorBorderSecondary: dark ? '#26262e' : '#eaeaef',
+          fontSize: 14,
+          colorBgLayout: dark ? '#0a0a0a' : '#ffffff',
+          colorBgContainer: dark ? '#111111' : '#ffffff',
+          colorBorderSecondary: dark ? '#26262e' : '#eaeaea',
+          colorTextSecondary: dark ? '#a1a1aa' : '#666666',
+          boxShadow: 'none',
+          boxShadowSecondary:
+            '0 1px 1px rgba(0,0,0,0.02), 0 4px 8px -4px rgba(0,0,0,0.04), 0 16px 24px -8px rgba(0,0,0,0.06)',
         },
         components: {
-          Card: { boxShadowTertiary: 'none' },
-          Table: { headerBg: dark ? '#1c1c22' : '#fafafb', headerSplitColor: 'transparent' },
+          Card: { boxShadowTertiary: 'none', borderRadiusLG: 8, paddingLG: 24 },
+          Modal: { borderRadiusLG: 8 },
+          Table: {
+            headerBg: 'transparent',
+            headerSplitColor: 'transparent',
+            headerColor: dark ? '#a1a1aa' : '#666666',
+            cellPaddingBlock: 12,
+            rowHoverBg: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+          },
           Menu: {
             itemBorderRadius: 8,
             itemSelectedBg: 'rgba(246,130,31,0.12)',
@@ -55,6 +71,8 @@ function ThemedApp() {
             headerBg: dark ? 'rgba(23,23,28,0.8)' : 'rgba(255,255,255,0.8)',
           },
           Button: { fontWeight: 500 },
+          Tabs: { horizontalMargin: '0 0 12px 0' },
+          Form: { labelColor: dark ? '#e4e4e7' : '#171717', verticalLabelPadding: '0 0 6px' },
         },
       }}
     >

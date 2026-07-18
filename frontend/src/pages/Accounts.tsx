@@ -1,14 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, Table, Button, Form, Input, Modal, message, Segmented, Tag, Space, Popconfirm, Typography, Alert } from 'antd'
 import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined, CloudServerOutlined } from '@ant-design/icons'
-import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { useAccountStore } from '../stores/useAccountStore'
 
-const { Title, Text } = Typography
+const { Text } = Typography
+import PageHeader from '../components/PageHeader'
 
 interface Account {
   id: string
@@ -24,7 +24,7 @@ interface Account {
 export default function Accounts() {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [authType, setAuthType] = useState<'globalApiKey' | 'apiToken'>('apiToken')
+  const authType = searchParams.get('mode') === 'globalApiKey' ? 'globalApiKey' : 'apiToken'
   const [form] = Form.useForm()
   const qc = useQueryClient()
   const activeAccountId = useAccountStore((s) => s.activeAccountId)
@@ -36,8 +36,13 @@ export default function Accounts() {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        if (open) next.set('modal', 'add')
-        else next.delete('modal')
+        if (open) {
+          next.set('modal', 'add')
+          if (!next.has('mode')) next.set('mode', 'apiToken')
+        } else {
+          next.delete('modal')
+          next.delete('mode')
+        }
         return next
       },
       { replace: true },
@@ -98,7 +103,7 @@ export default function Accounts() {
         <Space>
           <CloudServerOutlined />
           <span style={{ fontWeight: 500 }}>{label || r.email || r.id.slice(0, 8)}</span>
-          {r.id === activeAccountId && <Tag color="orange" bordered={false}>{t('Selected')}</Tag>}
+          {r.id === activeAccountId && <Tag color="orange" variant="filled">{t('Selected')}</Tag>}
         </Space>
       ),
     },
@@ -106,7 +111,7 @@ export default function Accounts() {
       title: t('Auth type'),
       dataIndex: 'authType',
       render: (v: string) => (
-        <Tag color={v === 'apiToken' ? 'orange' : 'default'} bordered={false}>
+        <Tag color={v === 'apiToken' ? 'orange' : 'default'} variant="filled">
           {v === 'apiToken' ? 'API Token' : 'Global API Key'}
         </Tag>
       ),
@@ -117,7 +122,7 @@ export default function Accounts() {
       title: t('Status'),
       dataIndex: 'isActive',
       render: (v: boolean) =>
-        v ? <Tag color="success" bordered={false}>{t('Active')}</Tag> : <Tag color="default" bordered={false}>{t('Inactive')}</Tag>,
+        v ? <Tag color="success" variant="filled">{t('Active')}</Tag> : <Tag color="default" variant="filled">{t('Inactive')}</Tag>,
     },
     {
       title: t('Actions'),
@@ -143,18 +148,18 @@ export default function Accounts() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
-      <div className="page-header">
-        <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
-          Cloudflare Accounts
-        </Title>
-        <Text type="secondary">{t('Manage multiple CF accounts and switch between them')}</Text>
-      </div>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
+      <PageHeader
+        title="Cloudflare Accounts"
+        description={t('Manage multiple CF accounts and switch between them')}
+        actions={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
+            {t('Add account')}
+          </Button>
+        }
+      />
       <Card>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)} style={{ marginBottom: 16 }}>
-          {t('Add account')}
-        </Button>
-        <Table loading={isLoading} dataSource={list} rowKey="id" columns={columns} />
+        <Table loading={isLoading} dataSource={list} rowKey="id" columns={columns} scroll={{ x: 'max-content' }} />
       </Card>
 
       <Modal
@@ -162,12 +167,16 @@ export default function Accounts() {
         open={addOpen}
         onCancel={() => setAddOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Segmented
           block
           value={authType}
-          onChange={(v) => setAuthType(v as 'globalApiKey' | 'apiToken')}
+          onChange={(value) => {
+            const next = new URLSearchParams(searchParams)
+            next.set('mode', value as string)
+            setSearchParams(next, { replace: true })
+          }}
           options={[
             { label: t('API Token (recommended)'), value: 'apiToken' },
             { label: 'Global API Key', value: 'globalApiKey' },

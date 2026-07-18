@@ -61,7 +61,7 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
       dataIndex: 'nameServers',
       key: 'nameServers',
       render: (ns: string[]) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           {ns.map((n) => (
             <Text key={n} copyable style={{ fontFamily: 'monospace' }}>
               {n}
@@ -76,7 +76,7 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
     .filter((i) => i.status === 'success' && i.result)
     .map((i) => i.result as CreatedZoneResult)
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       {results.length > 0 && (
         <>
           <Alert
@@ -90,6 +90,7 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
             columns={nsColumns}
             size="small"
             pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            scroll={{ x: 'max-content' }}
           />
         </>
       )}
@@ -130,7 +131,7 @@ export default function BulkAddDomainsModal({ open, onClose, onJobCreated }: Bul
       okButtonProps={{ disabled: valid.length === 0, loading: createMutation.isPending }}
       width={640}
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <Text type="secondary">{t('Paste a list of domains, one per line (max 500).')}</Text>
         <Input.TextArea
           rows={10}

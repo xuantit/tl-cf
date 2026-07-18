@@ -2,15 +2,58 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { cloudflareService } from "../services/cloudflare.js";
+import { cloudflareService, type CloudflareCredentials, type DnsRecord } from "../services/cloudflare.js";
 import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import { configService } from "../services/configService.js";
+import { createChangeSet, type ChangeItemPayload } from "../services/changes.js";
+import { sendApiError } from "../utils/apiError.js";
+import { isCloudflareError } from "../services/cloudflare.js";
 import logger from "../utils/logger.js";
 
 export const domainsRouter = Router();
 
 domainsRouter.use(requireAuth);
+
+// Look up a single DNS record's current state (used to snapshot "before" for change history)
+async function findDnsRecord(
+  credentials: CloudflareCredentials,
+  zoneId: string,
+  recordId: string,
+): Promise<DnsRecord | null> {
+  try {
+    const records = await cloudflareService.listDnsRecords(credentials, zoneId);
+    return records.find((record) => record.id === recordId) ?? null;
+  } catch (error: any) {
+    logger.warn("Failed to snapshot DNS record before mutation", { zoneId, recordId, error: error.message });
+    return null;
+  }
+}
+
+// Persist a change history entry; never let history failures break the primary operation
+async function recordChangeSet(payload: {
+  ownerId: string;
+  accountId: string | null;
+  zoneId: string;
+  action: string;
+  reversible: boolean;
+  items: ChangeItemPayload[];
+}): Promise<void> {
+  try {
+    await createChangeSet({
+      ownerId: payload.ownerId,
+      accountId: payload.accountId ?? undefined,
+      zoneId: payload.zoneId,
+      action: payload.action,
+      status: "done",
+      reversible: payload.reversible,
+      finishedAt: new Date(),
+      items: payload.items,
+    });
+  } catch (error: any) {
+    logger.warn("Failed to record change set", { action: payload.action, zoneId: payload.zoneId, error: error.message });
+  }
+}
 
 // Helper to get account ID from query or find by credentials (scoped to the requesting user)
 async function getAccountIdForCredentials(
@@ -37,6 +80,14 @@ domainsRouter.get("/", async (req, res) => {
   try {
     const accountId = req.query.accountId as string | undefined;
     const label = req.query.label as string | undefined;
+
+    // Users without any Cloudflare account should see an empty list, not a 500 error.
+    await configService.loadConfig();
+    const userAccounts = await configService.getAllAccounts(auth.userId);
+    if (userAccounts.length === 0) {
+      return res.json([]);
+    }
+
     const credentials = await getCredentials(auth.userId, accountId, label);
     const zones = await cloudflareService.listZones(credentials);
 
@@ -75,36 +126,36 @@ domainsRouter.get("/", async (req, res) => {
       }
     }
 
-    // If no accountId, try to get SSL mode from API for each zone (with rate limiting)
-    if (!resolvedAccountId) {
-      try {
-        // Limit to first 10 zones to avoid too many API calls
-        const zonesToEnrich = zones.slice(0, 10);
-        for (const zone of zonesToEnrich) {
-          try {
-            const sslSettings = await cloudflareService.getSslMode(credentials, zone.id);
-            (zone as any).sslMode = sslSettings.mode;
-            if (zone.ssl) {
-              zone.ssl.status = sslSettings.mode !== 'off' ? 'active' : 'off';
-            } else {
-              (zone as any).ssl = {
-                status: sslSettings.mode !== 'off' ? 'active' : 'off',
-                mode: sslSettings.mode,
-              };
-            }
-          } catch (error: any) {
-            // Skip if SSL fetch fails for this zone
-            logger.debug("Failed to get SSL mode for zone", { zoneId: zone.id, error: error.message });
+    // Fetch live SSL mode for zones that still lack it (saved settings only exist after the
+    // user changes SSL through this tool). Fetch in parallel, capped to avoid rate limits.
+    const zonesMissingSsl = zones.filter((zone) => !(zone as any).sslMode).slice(0, 10);
+    await Promise.all(
+      zonesMissingSsl.map(async (zone) => {
+        try {
+          const sslSettings = await cloudflareService.getSslMode(credentials, zone.id);
+          (zone as any).sslMode = sslSettings.mode;
+          if (zone.ssl) {
+            zone.ssl.status = sslSettings.mode !== 'off' ? 'active' : 'off';
+          } else {
+            (zone as any).ssl = {
+              status: sslSettings.mode !== 'off' ? 'active' : 'off',
+              mode: sslSettings.mode,
+            };
           }
+        } catch (error: any) {
+          // Skip if SSL fetch fails for this zone
+          logger.debug("Failed to get SSL mode for zone", { zoneId: zone.id, error: error.message });
         }
-      } catch (error: any) {
-        logger.warn("Failed to enrich zones with SSL mode", { error: error.message });
-      }
-    }
+      }),
+    );
 
     res.json(zones);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch domains" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "DOMAINS_LIST_FAILED",
+      detail: "Failed to fetch domains",
+    });
   }
 });
 
@@ -143,7 +194,11 @@ domainsRouter.post("/", async (req, res) => {
     res.status(201).json(zone);
   } catch (error: any) {
     logger.error("Failed to create zone", { error: error.message });
-    res.status(400).json({ detail: error.message || "Failed to create domain" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DOMAIN_CREATE_FAILED",
+      detail: "Failed to create domain",
+    });
   }
 });
 
@@ -190,7 +245,11 @@ domainsRouter.post("/bulk", async (req, res) => {
 
     res.status(202).json({ jobId: job.id });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Bulk operation failed" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "BULK_OPERATION_FAILED",
+      detail: "Bulk operation failed",
+    });
   }
 });
 
@@ -212,10 +271,18 @@ domainsRouter.post("/bulk-create", async (req, res) => {
     const names = [...new Set(body.names.map((n) => n.trim().toLowerCase()).filter(Boolean))];
     const invalid = names.filter((n) => !DOMAIN_NAME_REGEX.test(n));
     if (invalid.length > 0) {
-      return res.status(400).json({ detail: `Tên domain không hợp lệ: ${invalid.join(", ")}` });
+      return sendApiError(res, new Error(`Tên domain không hợp lệ: ${invalid.join(", ")}`), {
+        status: 400,
+        code: "DOMAIN_VALIDATION_FAILED",
+        detail: "Domain validation failed",
+      });
     }
     if (names.length === 0) {
-      return res.status(400).json({ detail: "Danh sách domain trống" });
+      return sendApiError(res, new Error("Danh sách domain trống"), {
+        status: 400,
+        code: "DOMAIN_LIST_EMPTY",
+        detail: "Domain list is empty",
+      });
     }
 
     const credentials = await getCredentials(auth.userId, accountId, label);
@@ -224,7 +291,11 @@ domainsRouter.post("/bulk-create", async (req, res) => {
     // Resolve the Cloudflare account id once to avoid repeated listAccounts calls
     const cfAccounts = await cloudflareService.listAccounts(credentials);
     if (cfAccounts.length === 0) {
-      return res.status(400).json({ detail: "Không tìm thấy Cloudflare account để tạo zone" });
+      return sendApiError(res, new Error("Không tìm thấy Cloudflare account để tạo zone"), {
+        status: 400,
+        code: "CLOUDFLARE_ACCOUNT_NOT_FOUND",
+        detail: "No Cloudflare account available for zone creation",
+      });
     }
     const cfAccountId = cfAccounts[0].id;
 
@@ -259,7 +330,11 @@ domainsRouter.post("/bulk-create", async (req, res) => {
 
     res.status(202).json({ jobId: job.id });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Bulk create failed" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "BULK_CREATE_FAILED",
+      detail: "Bulk create failed",
+    });
   }
 });
 
@@ -322,7 +397,11 @@ domainsRouter.post("/bulk-dns/preview", async (req, res) => {
 
     res.json({ matches, total: matches.length });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Preview failed" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "BULK_DNS_PREVIEW_FAILED",
+      detail: "Preview failed",
+    });
   }
 });
 
@@ -375,7 +454,11 @@ domainsRouter.post("/bulk-dns/replace", async (req, res) => {
 
     res.status(202).json({ jobId: job.id });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Bulk DNS replace failed" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "BULK_DNS_REPLACE_FAILED",
+      detail: "Bulk DNS replace failed",
+    });
   }
 });
 
@@ -434,7 +517,11 @@ domainsRouter.get("/:zoneId", async (req, res) => {
 
     res.json(zone);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch domain details" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "DOMAIN_DETAIL_FAILED",
+      detail: "Failed to fetch domain details",
+    });
   }
 });
 
@@ -464,7 +551,11 @@ domainsRouter.delete("/:zoneId", async (req, res) => {
     res.status(204).send();
   } catch (error: any) {
     logger.error("Failed to delete zone", { error: error.message });
-    res.status(400).json({ detail: error.message || "Failed to delete domain" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DOMAIN_DELETE_FAILED",
+      detail: "Failed to delete domain",
+    });
   }
 });
 
@@ -484,7 +575,11 @@ domainsRouter.put("/:zoneId/tags", async (req, res) => {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
     if (!resolvedAccountId) {
-      return res.status(404).json({ detail: "Account not found" });
+      return sendApiError(res, new Error("Account not found"), {
+        status: 404,
+        code: "ACCOUNT_NOT_FOUND",
+        detail: "Account not found",
+      });
     }
 
     let domain = await configService.getDomainByZoneId(resolvedAccountId, zoneId);
@@ -502,7 +597,11 @@ domainsRouter.put("/:zoneId/tags", async (req, res) => {
     res.json({ zoneId, tags });
   } catch (error: any) {
     logger.error("Failed to update tags", { error: error.message, zoneId });
-    res.status(400).json({ detail: error.message || "Failed to update tags" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DOMAIN_TAGS_UPDATE_FAILED",
+      detail: "Failed to update tags",
+    });
   }
 });
 
@@ -517,7 +616,11 @@ domainsRouter.get("/:zoneId/dns", async (req, res) => {
     const records = await cloudflareService.listDnsRecords(credentials, zoneId);
     res.json(records);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch DNS records" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "DNS_LIST_FAILED",
+      detail: "Failed to fetch DNS records",
+    });
   }
 });
 
@@ -538,9 +641,30 @@ domainsRouter.post("/:zoneId/dns", async (req, res) => {
     const body = bodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const record = await cloudflareService.createDnsRecord(credentials, zoneId, body);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "dns.create",
+      reversible: true,
+      items: [
+        {
+          resourceType: "dns_record",
+          resourceId: record.id,
+          before: undefined,
+          after: record,
+        },
+      ],
+    });
+
     res.status(201).json(record);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to create DNS record" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DNS_CREATE_FAILED",
+      detail: "Failed to create DNS record",
+    });
   }
 });
 
@@ -560,10 +684,32 @@ domainsRouter.put("/:zoneId/dns/:recordId", async (req, res) => {
   try {
     const body = bodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
+    const before = await findDnsRecord(credentials, zoneId, recordId);
     const record = await cloudflareService.updateDnsRecord(credentials, zoneId, recordId, body);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "dns.update",
+      reversible: before !== null,
+      items: [
+        {
+          resourceType: "dns_record",
+          resourceId: recordId,
+          before: before ?? undefined,
+          after: record,
+        },
+      ],
+    });
+
     res.json(record);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update DNS record" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DNS_UPDATE_FAILED",
+      detail: "Failed to update DNS record",
+    });
   }
 });
 
@@ -574,10 +720,32 @@ domainsRouter.delete("/:zoneId/dns/:recordId", async (req, res) => {
   const label = req.query.label as string | undefined;
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
+    const before = await findDnsRecord(credentials, zoneId, recordId);
     await cloudflareService.deleteDnsRecord(credentials, zoneId, recordId);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "dns.delete",
+      reversible: before !== null,
+      items: [
+        {
+          resourceType: "dns_record",
+          resourceId: recordId,
+          before: before ?? undefined,
+          after: undefined,
+        },
+      ],
+    });
+
     res.status(204).send();
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to delete DNS record" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "DNS_DELETE_FAILED",
+      detail: "Failed to delete DNS record",
+    });
   }
 });
 
@@ -592,7 +760,11 @@ domainsRouter.get("/:zoneId/cache-config", async (req, res) => {
     const settings = await cloudflareService.getCacheSettings(credentials, zoneId);
     res.json(settings);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch cache settings" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "CACHE_SETTINGS_READ_FAILED",
+      detail: "Failed to fetch cache settings",
+    });
   }
 });
 
@@ -609,7 +781,24 @@ domainsRouter.put("/:zoneId/cache-config", async (req, res) => {
   try {
     const body = bodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
+    const beforeSettings = await cloudflareService.getCacheSettings(credentials, zoneId).catch(() => null);
     const settings = await cloudflareService.updateCacheSettings(credentials, zoneId, body);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "cache.update",
+      reversible: beforeSettings !== null,
+      items: [
+        {
+          resourceType: "zone_cache_config",
+          resourceId: zoneId,
+          before: beforeSettings ?? undefined,
+          after: settings,
+        },
+      ],
+    });
 
     // Save to JSON config
     const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
@@ -640,7 +829,11 @@ domainsRouter.put("/:zoneId/cache-config", async (req, res) => {
 
     res.json(settings);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update cache settings" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "CACHE_SETTINGS_UPDATE_FAILED",
+      detail: "Failed to update cache settings",
+    });
   }
 });
 
@@ -662,7 +855,11 @@ domainsRouter.post("/:zoneId/cache-config/purge", async (req, res) => {
     }
     res.json({ success: true });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to purge cache" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "CACHE_PURGE_FAILED",
+      detail: "Failed to purge cache",
+    });
   }
 });
 
@@ -677,7 +874,11 @@ domainsRouter.get("/:zoneId/security", async (req, res) => {
     const settings = await cloudflareService.getSecuritySettings(credentials, zoneId);
     res.json(settings);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch security settings" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "SECURITY_SETTINGS_READ_FAILED",
+      detail: "Failed to fetch security settings",
+    });
   }
 });
 
@@ -712,7 +913,11 @@ domainsRouter.patch("/:zoneId/security", async (req, res) => {
     const settings = await cloudflareService.getSecuritySettings(credentials, zoneId);
     res.json(settings);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update security settings" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "SECURITY_SETTINGS_UPDATE_FAILED",
+      detail: "Failed to update security settings",
+    });
   }
 });
 
@@ -727,7 +932,11 @@ domainsRouter.get("/:zoneId/ssl", async (req, res) => {
     const sslSettings = await cloudflareService.getSslMode(credentials, zoneId);
     res.json(sslSettings);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch SSL settings" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "SSL_SETTINGS_READ_FAILED",
+      detail: "Failed to fetch SSL settings",
+    });
   }
 });
 
@@ -742,7 +951,24 @@ domainsRouter.patch("/:zoneId/ssl", async (req, res) => {
   try {
     const body = bodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
+    const beforeSsl = await cloudflareService.getSslMode(credentials, zoneId).catch(() => null);
     const sslSettings = await cloudflareService.updateSslMode(credentials, zoneId, body.mode);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "ssl.update",
+      reversible: beforeSsl !== null,
+      items: [
+        {
+          resourceType: "zone_setting_ssl",
+          resourceId: zoneId,
+          before: beforeSsl ?? undefined,
+          after: sslSettings,
+        },
+      ],
+    });
 
     // Save to JSON config
     const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
@@ -768,7 +994,11 @@ domainsRouter.patch("/:zoneId/ssl", async (req, res) => {
 
     res.json(sslSettings);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update SSL settings" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "SSL_SETTINGS_UPDATE_FAILED",
+      detail: "Failed to update SSL settings",
+    });
   }
 });
 
@@ -781,9 +1011,19 @@ domainsRouter.get("/:zoneId/tiered-cache", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const tieredCache = await cloudflareService.getTieredCacheTopology(credentials, zoneId);
-    res.json(tieredCache);
+    res.json({ ...tieredCache, available: true });
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch tiered cache topology" });
+    // Token lacks the tiered cache permission (or plan doesn't include it):
+    // degrade gracefully so the UI can disable the control instead of erroring.
+    if (isCloudflareError(error) && (error.status === 403 || error.status === 401)) {
+      res.json({ topology: null, available: false });
+      return;
+    }
+    sendApiError(res, error, {
+      status: 500,
+      code: "TIERED_CACHE_READ_FAILED",
+      detail: "Failed to fetch tiered cache topology",
+    });
   }
 });
 
@@ -793,11 +1033,32 @@ domainsRouter.patch("/:zoneId/tiered-cache", async (req, res) => {
   const accountId = req.query.accountId as string | undefined;
   const label = req.query.label as string | undefined;
   const bodySchema = z.object({
-    topology: z.string(),
+    topology: z.enum(["off", "smart", "generic"]),
   });
   try {
     const body = bodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
+
+    // Generic Global topology is Enterprise-only; verify the zone plan before calling Cloudflare.
+    if (body.topology === "generic") {
+      try {
+        const zone = await cloudflareService.getZoneDetails(credentials, zoneId);
+        if (zone.plan && zone.plan !== "enterprise") {
+          res.status(403).json({
+            code: "PLAN_UPGRADE_REQUIRED",
+            detail: "Generic Global Tiered Cache requires an Enterprise plan",
+            retryable: false,
+            requiredPermission: null,
+            planRequirement: "enterprise",
+            cf: null,
+          });
+          return;
+        }
+      } catch {
+        // If the plan check fails, let Cloudflare decide.
+      }
+    }
+
     const tieredCache = await cloudflareService.updateTieredCacheTopology(credentials, zoneId, body.topology);
 
     // Save to JSON config
@@ -825,13 +1086,46 @@ domainsRouter.patch("/:zoneId/tiered-cache", async (req, res) => {
       }
     }
 
-    res.json(tieredCache);
+    res.json({ ...tieredCache, available: true });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update tiered cache topology" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "TIERED_CACHE_UPDATE_FAILED",
+      detail: "Failed to update tiered cache topology",
+    });
   }
 });
 
 // Rules (Page Rules)
+const pageRuleTargetSchema = z.object({
+  target: z.literal("url"),
+  constraint: z.object({
+    operator: z.enum(["matches", "contains", "equals", "not_equal", "not_contain"]),
+    value: z.string().min(1),
+  }),
+});
+
+const pageRuleActionSchema = z.object({
+  id: z.string().min(1),
+  value: z.unknown().optional(),
+});
+
+const pageRuleStatusSchema = z.enum(["active", "disabled"]);
+
+const createPageRuleBodySchema = z.object({
+  targets: z.array(pageRuleTargetSchema).min(1),
+  actions: z.array(pageRuleActionSchema).min(1),
+  priority: z.number().int().nonnegative().optional(),
+  status: pageRuleStatusSchema.optional(),
+});
+
+const updatePageRuleBodySchema = z.object({
+  status: pageRuleStatusSchema.optional(),
+  priority: z.number().int().nonnegative().optional(),
+  targets: z.array(pageRuleTargetSchema).min(1).optional(),
+  actions: z.array(pageRuleActionSchema).min(1).optional(),
+});
+
 domainsRouter.get("/:zoneId/rules", async (req, res) => {
   const auth = req.auth as AuthUser;
   const { zoneId } = req.params;
@@ -842,7 +1136,35 @@ domainsRouter.get("/:zoneId/rules", async (req, res) => {
     const rules = await cloudflareService.listPageRules(credentials, zoneId);
     res.json(rules);
   } catch (error: any) {
-    res.status(500).json({ detail: error.message || "Failed to fetch rules" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "RULES_LIST_FAILED",
+      detail: "Failed to fetch rules",
+    });
+  }
+});
+
+domainsRouter.post("/:zoneId/rules", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  try {
+    const body = createPageRuleBodySchema.parse(req.body);
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const rule = await cloudflareService.createPageRule(credentials, zoneId, {
+      targets: body.targets,
+      actions: body.actions,
+      priority: body.priority ?? 1,
+      status: body.status ?? "active",
+    });
+    res.status(201).json(rule);
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "RULE_CREATE_FAILED",
+      detail: "Failed to create rule",
+    });
   }
 });
 
@@ -851,18 +1173,34 @@ domainsRouter.put("/:zoneId/rules/:ruleId", async (req, res) => {
   const { zoneId, ruleId } = req.params;
   const accountId = req.query.accountId as string | undefined;
   const label = req.query.label as string | undefined;
-  const bodySchema = z.object({
-    status: z.string().optional(),
-    priority: z.number().optional(),
-    targets: z.array(z.any()).optional(),
-    actions: z.array(z.any()).optional(),
-  });
   try {
-    const body = bodySchema.parse(req.body);
+    const body = updatePageRuleBodySchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const rule = await cloudflareService.updatePageRule(credentials, zoneId, ruleId, body);
     res.json(rule);
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to update rule" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "RULE_UPDATE_FAILED",
+      detail: "Failed to update rule",
+    });
+  }
+});
+
+domainsRouter.delete("/:zoneId/rules/:ruleId", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId, ruleId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  try {
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    await cloudflareService.deletePageRule(credentials, zoneId, ruleId);
+    res.status(204).send();
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "RULE_DELETE_FAILED",
+      detail: "Failed to delete rule",
+    });
   }
 });

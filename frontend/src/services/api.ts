@@ -9,7 +9,7 @@ export const api = axios.create({
 
 // Endpoints that operate on the currently selected Cloudflare account.
 // The active accountId is injected automatically as a query param.
-const ACCOUNT_SCOPED = ['/domains', '/cf/test', '/templates']
+const ACCOUNT_SCOPED = ['/domains', '/cf/test', '/templates', '/rules', '/changes']
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token

@@ -2,8 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { cloudflareService, type CloudflareCredentials } from "../services/cloudflare.js";
+import {
+  cloudflareService,
+  type CloudflareCredentials,
+} from "../services/cloudflare.js";
 import { decrypt, encrypt } from "../utils/encryption.js";
+import { sendApiError, apiErrorEnvelope } from "../utils/apiError.js";
+import { featureFromCloudflareError, type FeatureState } from "../utils/capabilities.js";
 import { configService } from "../services/configService.js";
 import logger from "../utils/logger.js";
 
@@ -67,7 +72,11 @@ cfRouter.post("/credentials", async (req, res) => {
       isValid = await cloudflareService.testConnection(credentials);
     } catch (error: any) {
       logger.error("Cloudflare connection test failed", { error: error.message });
-      return res.status(400).json({ detail: "Failed to connect to Cloudflare: " + (error.message || "Unknown error") });
+      return sendApiError(res, error, {
+        status: 400,
+        code: "CLOUDFLARE_CONNECTION_FAILED",
+        detail: "Failed to connect to Cloudflare",
+      });
     }
 
     if (!isValid) {
@@ -107,13 +116,21 @@ cfRouter.post("/credentials", async (req, res) => {
       }
     } catch (error: any) {
       logger.error("Failed to save credentials", { error: error.message, userId: auth.userId });
-      return res.status(500).json({ detail: "Failed to save credentials: " + error.message });
+      return sendApiError(res, error, {
+        status: 500,
+        code: "CREDENTIAL_SAVE_FAILED",
+        detail: "Failed to save credentials",
+      });
     }
 
     res.json({ success: true });
   } catch (error: any) {
     logger.error("Unexpected error in /credentials", { error: error.message, stack: error.stack });
-    res.status(500).json({ detail: "Internal server error: " + error.message });
+    sendApiError(res, error, {
+      status: 500,
+      code: "INTERNAL_SERVER_ERROR",
+      detail: "Internal server error",
+    });
   }
 });
 
@@ -152,7 +169,11 @@ cfRouter.get("/credentials", async (req, res) => {
     });
   } catch (error: any) {
     logger.error("Failed to get credentials", { error: error.message });
-    res.status(500).json({ detail: error.message || "Failed to get credentials" });
+    sendApiError(res, error, {
+      status: 500,
+      code: "CREDENTIAL_READ_FAILED",
+      detail: "Failed to get credentials",
+    });
   }
 });
 
@@ -194,7 +215,84 @@ cfRouter.get("/test", async (req, res) => {
     const isValid = await cloudflareService.testConnection(credentials);
     res.json({ valid: isValid });
   } catch (error: any) {
-    res.status(400).json({ detail: error.message || "Failed to test connection" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "CONNECTION_TEST_FAILED",
+      detail: "Failed to test connection",
+    });
+  }
+});
+
+cfRouter.get("/capabilities", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const zoneId = req.query.zoneId as string | undefined;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+
+  try {
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const token = {
+      valid: true,
+      authType: credentials.authType,
+      accountId: accountId || null,
+    };
+
+    let zone: { id: string; plan: string | null } | null = null;
+
+    const unknownFeature = (requiredPermission: string) => ({
+      state: "unknown" as FeatureState,
+      requiredPermission,
+      reason: zoneId ? null : "zoneId is required",
+    });
+
+    const features: Record<string, { state: FeatureState; requiredPermission: string; reason: string | null }> = {
+      dns: unknownFeature("DNS Write"),
+      cachePurge: unknownFeature("Cache Purge"),
+      ssl: unknownFeature("Zone Settings Write"),
+      pageRules: unknownFeature("Page Rules Write"),
+      modernRules: unknownFeature("Zone Rulesets Write"),
+    };
+
+    // Non-destructive probe: run a read, mark available on success, classify the CF error otherwise.
+    const probeFeature = async (
+      name: keyof typeof features,
+      requiredPermission: string,
+      probe: () => Promise<unknown>,
+    ) => {
+      try {
+        await probe();
+        features[name] = { state: "available", requiredPermission, reason: null };
+      } catch (error) {
+        features[name] = featureFromCloudflareError(error, requiredPermission);
+      }
+    };
+
+    if (zoneId) {
+      try {
+        const zoneDetails = await cloudflareService.getZoneDetails(credentials, zoneId);
+        zone = { id: zoneDetails.id, plan: zoneDetails.plan ?? null };
+      } catch (error) {
+        zone = { id: zoneId, plan: null };
+      }
+
+      await Promise.all([
+        probeFeature("dns", "DNS Write", () => cloudflareService.listDnsRecords(credentials, zoneId)),
+        probeFeature("cachePurge", "Cache Purge", () => cloudflareService.getCacheSettings(credentials, zoneId)),
+        probeFeature("ssl", "Zone Settings Write", () => cloudflareService.getSslMode(credentials, zoneId)),
+        probeFeature("pageRules", "Page Rules Write", () => cloudflareService.listPageRules(credentials, zoneId)),
+        probeFeature("modernRules", "Zone Rulesets Write", () =>
+          cloudflareService.getRulesetRules(credentials, zoneId, "http_request_dynamic_redirect"),
+        ),
+      ]);
+    }
+
+    return res.json({ token, zone, features });
+  } catch (error) {
+    return sendApiError(res, error, {
+      status: 400,
+      code: "CAPABILITY_PROBE_FAILED",
+      detail: "Failed to evaluate Cloudflare capabilities",
+    });
   }
 });
 
@@ -238,6 +336,24 @@ cfRouter.post("/accounts", async (req, res) => {
     }
 
     await configService.loadConfig();
+
+    // Prevent duplicate accounts: Global API Key dedupes by email, API Token dedupes by label.
+    const existingAccounts = await configService.getAllAccounts(auth.userId);
+    const duplicate =
+      body.authType === "apiToken"
+        ? body.label
+          ? existingAccounts.find((acc) => acc.authType === "apiToken" && acc.label === body.label)
+          : undefined
+        : existingAccounts.find((acc) => acc.authType !== "apiToken" && acc.email === body.email);
+
+    if (duplicate) {
+      const reason =
+        body.authType === "apiToken"
+          ? `Tài khoản API Token với nhãn "${body.label}" đã tồn tại`
+          : `Tài khoản Global API Key với email "${body.email}" đã tồn tại`;
+      return res.status(409).json(apiErrorEnvelope(new Error(reason), "ACCOUNT_DUPLICATE", reason));
+    }
+
     const encrypted = encrypt(secret);
     const account = await configService.addAccount({
       userId: auth.userId,
@@ -257,7 +373,11 @@ cfRouter.post("/accounts", async (req, res) => {
     });
   } catch (error: any) {
     logger.error("Failed to create account", { error: error.message });
-    res.status(400).json({ detail: error.message || "Failed to create account" });
+    sendApiError(res, error, {
+      status: 400,
+      code: "ACCOUNT_CREATE_FAILED",
+      detail: "Failed to create account",
+    });
   }
 });
 

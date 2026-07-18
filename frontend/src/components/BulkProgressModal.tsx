@@ -70,9 +70,9 @@ export default function BulkProgressModal({ jobId, open, onClose, title, renderD
       footer={null}
       width={720}
       maskClosable={isDone}
-      destroyOnClose
+      destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         {isError && (
           <Alert
             type="warning"
@@ -112,6 +112,7 @@ export default function BulkProgressModal({ jobId, open, onClose, title, renderD
           columns={columns}
           size="small"
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          scroll={{ x: 'max-content' }}
         />
         {isDone && job && renderDone?.(job)}
       </Space>

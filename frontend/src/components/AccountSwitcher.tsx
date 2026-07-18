@@ -55,7 +55,7 @@ export default function AccountSwitcher() {
         value={activeAccountId ?? undefined}
         onChange={handleChange}
         loading={isLoading}
-        style={{ minWidth: 220 }}
+        style={{ minWidth: 140, maxWidth: 220, width: '100%' }}
         placeholder={t('Select account')}
         options={accounts.map((a) => ({
           value: a.id,

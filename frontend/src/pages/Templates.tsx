@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -31,8 +31,9 @@ import {
 import { api } from '../services/api'
 import { useTranslation } from 'react-i18next'
 import BulkProgressModal from '../components/BulkProgressModal'
+import PageHeader from '../components/PageHeader'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'TXT', 'MX']
 
@@ -70,8 +71,6 @@ export default function Templates() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [applyZoneKeys, setApplyZoneKeys] = useState<string[]>([])
-  const [applyMode, setApplyMode] = useState<'skip' | 'overwrite'>('skip')
   const [editorForm] = Form.useForm<EditorValues>()
   const [fromZoneForm] = Form.useForm<{ zoneId: string; name: string; description?: string }>()
 
@@ -104,6 +103,20 @@ export default function Templates() {
   const editId = searchParams.get('edit')
   const applyId = searchParams.get('apply')
   const jobId = searchParams.get('job')
+  const applyZoneKeys = searchParams.getAll('zone')
+  const applyMode = searchParams.get('mode') === 'overwrite' ? 'overwrite' : 'skip'
+
+  const setApplyZoneKeys = (zoneIds: string[]) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('zone')
+        zoneIds.forEach((zoneId) => next.append('zone', zoneId))
+        return next
+      },
+      { replace: true },
+    )
+  }
 
   const editing = editId ? templates.find((tpl) => tpl.id === editId) || null : null
   const applyTemplate = applyId ? templates.find((tpl) => tpl.id === applyId) || null : null
@@ -173,14 +186,25 @@ export default function Templates() {
         await api.post(`/templates/${applyTemplate!.id}/apply`, { zones, mode: applyMode })
       ).data as { jobId: string }
     },
-    onSuccess: (data) => setParams({ apply: null, job: data.jobId }),
+    onSuccess: (data) => setParams({ apply: null, mode: null, zone: null, job: data.jobId }),
     onError: (e: any) => message.error(e.response?.data?.detail || t('Could not apply template')),
   })
 
   const closeApply = () => {
-    setParams({ apply: null, job: null })
-    setApplyZoneKeys([])
-    setApplyMode('skip')
+    // Remove all apply-related params in a single update. Calling setSearchParams twice in one
+    // handler is unreliable because react-router's ref isn't updated between synchronous calls,
+    // which would let the second call overwrite the first (leaving the modal open).
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('apply')
+        next.delete('job')
+        next.delete('mode')
+        next.delete('zone')
+        return next
+      },
+      { replace: true },
+    )
   }
 
   const columns: ColumnsType<DnsTemplate> = [
@@ -195,7 +219,7 @@ export default function Templates() {
       title: t('Record count'),
       key: 'count',
       width: 110,
-      render: (_: unknown, r: DnsTemplate) => <Tag bordered={false}>{r.records.length}</Tag>,
+      render: (_: unknown, r: DnsTemplate) => <Tag variant="filled">{r.records.length}</Tag>,
     },
     {
       title: t('Actions'),
@@ -203,7 +227,7 @@ export default function Templates() {
       width: 320,
       render: (_: unknown, record: DnsTemplate) => (
         <Space>
-          <Button type="primary" icon={<SendOutlined />} onClick={() => setParams({ apply: record.id })}>
+          <Button type="primary" icon={<SendOutlined />} onClick={() => setParams({ apply: record.id, mode: 'skip' })}>
             Apply
           </Button>
           <Button icon={<EditOutlined />} onClick={() => setParams({ edit: record.id })}>
@@ -227,33 +251,36 @@ export default function Templates() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
-      <div className="page-header">
-        <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
-          DNS Templates
-        </Title>
-        <Text type="secondary">
-          {t('Save a standard DNS record set and apply it to many domains at once. Supports placeholders')}{' '}
-          <Text code>{'{domain}'}</Text> {t('and')} <Text code>@</Text> {t('(root domain)')}.
-        </Text>
-      </div>
-
-      <Card style={{ marginTop: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <Space>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setParams({ modal: 'create' })}>
-              {t('Create template')}
-            </Button>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
+      <PageHeader
+        title="DNS Templates"
+        description={
+          <>
+            {t('Save a standard DNS record set and apply it to many domains at once. Supports placeholders')}{' '}
+            <Text code>{'{domain}'}</Text> {t('and')} <Text code>@</Text> {t('(root domain)')}.
+          </>
+        }
+        actions={
+          <>
             <Button icon={<CloudDownloadOutlined />} onClick={() => setParams({ modal: 'from-zone' })}>
               {t('Create from existing domain')}
             </Button>
-          </Space>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setParams({ modal: 'create' })}>
+              {t('Create template')}
+            </Button>
+          </>
+        }
+      />
+
+      <Card style={{ marginTop: 16 }}>
+        <Space orientation="vertical" style={{ width: '100%' }} size="large">
           <Table
             loading={isLoading}
             dataSource={templates}
             rowKey="id"
             columns={columns}
             pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            scroll={{ x: 'max-content' }}
           />
         </Space>
       </Card>
@@ -267,6 +294,7 @@ export default function Templates() {
         okText={t('Save')}
         cancelText={t('Cancel')}
         width={900}
+        style={{ maxWidth: '95vw' }}
         confirmLoading={saveMutation.isPending}
       >
         <Form form={editorForm} layout="vertical" onFinish={(v) => saveMutation.mutate(v)}>
@@ -284,7 +312,7 @@ export default function Templates() {
           />
           <Form.List name="records">
             {(fields, { add, remove }) => (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 {fields.map((field) => (
                   <Space key={field.key} align="baseline" wrap>
                     <Form.Item
@@ -389,10 +417,10 @@ export default function Templates() {
           confirmLoading={applyMutation.isPending}
           width={720}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <div>
               <Text strong>{t('Existing records (same type + name): ')}</Text>
-              <Radio.Group value={applyMode} onChange={(e) => setApplyMode(e.target.value)}>
+              <Radio.Group value={applyMode} onChange={(e) => setParams({ mode: e.target.value })}>
                 <Radio.Button value="skip">{t('Skip')}</Radio.Button>
                 <Radio.Button value="overwrite">{t('Overwrite')}</Radio.Button>
               </Radio.Group>
@@ -416,6 +444,7 @@ export default function Templates() {
                 onChange: (keys: Key[]) => setApplyZoneKeys(keys as string[]),
               }}
               pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              scroll={{ x: 'max-content' }}
             />
           </Space>
         </Modal>

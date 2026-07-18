@@ -105,10 +105,10 @@ export default function AuditLog() {
       render: (_, r) => {
         const label = actionLabel(r.path)
         return (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             {label && <Text>{t(label)}</Text>}
             <Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              <Tag color={METHOD_COLORS[r.method] || 'default'} bordered={false} style={{ marginRight: 4 }}>
+              <Tag color={METHOD_COLORS[r.method] || 'default'} variant="filled" style={{ marginRight: 4 }}>
                 {r.method}
               </Tag>
               {r.path}
@@ -122,7 +122,7 @@ export default function AuditLog() {
       dataIndex: 'status',
       width: 100,
       render: (status: number) => (
-        <Tag color={status < 400 ? 'success' : status < 500 ? 'warning' : 'error'} bordered={false}>{status}</Tag>
+        <Tag color={status < 400 ? 'success' : status < 500 ? 'warning' : 'error'} variant="filled">{status}</Tag>
       ),
     },
     {
@@ -132,8 +132,8 @@ export default function AuditLog() {
       render: (meta: unknown) =>
         meta ? (
           <Tooltip
-            title={<pre style={{ margin: 0, maxWidth: 400, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(meta, null, 2)}</pre>}
-            styles={{ root: { maxWidth: 450 } }}
+            title={<pre style={{ margin: 0, maxWidth: '90vw', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(meta, null, 2)}</pre>}
+            styles={{ root: { maxWidth: '92vw' } }}
           >
             <Button type="link" size="small">{t('View')}</Button>
           </Tooltip>
@@ -151,7 +151,7 @@ export default function AuditLog() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
@@ -165,7 +165,7 @@ export default function AuditLog() {
           <Input.Search
             placeholder={t('Filter by path (e.g. /api/domains)')}
             allowClear
-            style={{ width: 280 }}
+            style={{ width: '100%', maxWidth: 280 }}
             onSearch={(v) => {
               setPage(1)
               setPathFilter(v.trim())
@@ -182,6 +182,7 @@ export default function AuditLog() {
           columns={columns}
           dataSource={data?.items || []}
           loading={isLoading}
+          scroll={{ x: 'max-content' }}
           pagination={{
             current: page,
             pageSize: 50,

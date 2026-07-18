@@ -6,15 +6,11 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background-color: #f7f7f8;
-  background-image: radial-gradient(600px circle at 15% 20%, rgba(246, 130, 31, 0.08), transparent 60%),
-    radial-gradient(600px circle at 85% 80%, rgba(246, 130, 31, 0.06), transparent 60%);
+  background-color: #fafafa;
 }
 
 body.dark .auth-container {
-  background-color: #101014;
-  background-image: radial-gradient(600px circle at 15% 20%, rgba(246, 130, 31, 0.1), transparent 60%),
-    radial-gradient(600px circle at 85% 80%, rgba(246, 130, 31, 0.1), transparent 60%);
+  background-color: #0a0a0a;
 }
 
 .auth-card {
@@ -27,6 +23,19 @@ body.dark .auth-container {
 
 .page-header {
   margin-bottom: 24px;
+}
+
+/* Tabler-style table headers: small uppercase secondary labels */
+.ant-table-thead > tr > th {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Keep row separators light so content leads */
+.ant-table-tbody > tr > td {
+  border-bottom-width: 1px;
 }
 
 .stat-card {

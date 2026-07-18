@@ -1,14 +1,11 @@
-import { Routes, Route, Link, Navigate, Outlet, useLocation } from 'react-router-dom'
-import { Layout, Menu, Button, theme, Tooltip, Spin, Dropdown, Avatar } from 'antd'
+import { Routes, Route, Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Button, Spin, Dropdown, Avatar, Input } from 'antd'
 import type { MenuProps } from 'antd'
 import {
-  DashboardOutlined,
   GlobalOutlined,
   LogoutOutlined,
   CloudOutlined,
   TeamOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   BulbOutlined,
   BulbFilled,
   FileTextOutlined,
@@ -17,8 +14,11 @@ import {
   UserOutlined,
   FileSearchOutlined,
   TranslationOutlined,
+  SearchOutlined,
+  MenuOutlined,
+  CloseOutlined,
 } from '@ant-design/icons'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore, getRoleFromToken, getEmailFromToken } from './stores/useAuthStore'
 import { useThemeStore } from './stores/useThemeStore'
@@ -26,19 +26,58 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AccountSwitcher from './components/AccountSwitcher'
 import './App.css'
 
-const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Domains = lazy(() => import('./pages/Domains'))
 const DomainDetail = lazy(() => import('./pages/DomainDetail'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Templates = lazy(() => import('./pages/Templates'))
-const Jobs = lazy(() => import('./pages/Jobs'))
+const History = lazy(() => import('./pages/History'))
 const Invites = lazy(() => import('./pages/Invites'))
 const Users = lazy(() => import('./pages/Users'))
 const AuditLogPage = lazy(() => import('./pages/AuditLog'))
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
 
-const { Header, Content, Sider } = Layout
+// Redirect legacy paths to their new location while preserving query params.
+function RedirectWithQuery({ to, extraParams }: { to: string; extraParams?: Record<string, string> }) {
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  for (const [key, value] of Object.entries(extraParams || {})) {
+    params.set(key, value)
+  }
+  const search = params.toString()
+  return <Navigate to={search ? `${to}?${search}` : to} replace />
+}
+
+// Redirect legacy zone-scoped pages (e.g. /dns?zone=X) into the domain hub tab.
+function RedirectZonePage({ tab, extraParams }: { tab: string; extraParams?: Record<string, string> }) {
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  const zone = params.get('zone')
+  if (!zone) return <Navigate to="/" replace />
+  params.delete('zone')
+  params.set('tab', tab)
+  for (const [key, value] of Object.entries(extraParams || {})) {
+    params.set(key, value)
+  }
+  return <Navigate to={`/domains/${zone}?${params.toString()}`} replace />
+}
+
+function NavItem({ to, icon, label, active, onClick }: { to: string; icon: React.ReactNode; label: React.ReactNode; active: boolean; onClick?: () => void }) {
+  return (
+    <Link
+      to={to}
+      onClick={onClick}
+      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors ${
+        active
+          ? 'bg-[rgba(246,130,31,0.12)] font-medium !text-[#f6821f]'
+          : '!text-fg-secondary hover:bg-black/[0.04] hover:!text-fg dark:!text-fg-dark-secondary dark:hover:bg-white/[0.06] dark:hover:!text-fg-dark'
+      }`}
+    >
+      <span className="text-base leading-none">{icon}</span>
+      <span className="truncate">{label}</span>
+    </Link>
+  )
+}
 
 function MainLayout() {
   const { t, i18n } = useTranslation()
@@ -48,158 +87,166 @@ function MainLayout() {
   const email = getEmailFromToken(authToken)
   const dark = useThemeStore((s) => s.dark)
   const toggleTheme = useThemeStore((s) => s.toggle)
-  const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [find, setFind] = useState('')
   const location = useLocation()
-  const { token } = theme.useToken()
+  const navigate = useNavigate()
 
-  const menuItems = [
-    { key: '/', icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link> },
-    { key: '/domains', icon: <GlobalOutlined />, label: <Link to="/domains">Domains</Link> },
-    { key: '/templates', icon: <FileTextOutlined />, label: <Link to="/templates">Templates</Link> },
-    { key: '/jobs', icon: <HistoryOutlined />, label: <Link to="/jobs">{t('Jobs history')}</Link> },
-    { key: '/accounts', icon: <TeamOutlined />, label: <Link to="/accounts">{t('Accounts')}</Link> },
+  // Close the mobile sidebar after navigating
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [location.pathname])
+
+  const navItems = [
+    { key: '/', icon: <GlobalOutlined />, label: 'Domains' },
+    { key: '/templates', icon: <FileTextOutlined />, label: 'Templates' },
+    { key: '/history', icon: <HistoryOutlined />, label: t('History') },
+    { key: '/accounts', icon: <TeamOutlined />, label: t('Accounts') },
   ]
 
-  const adminMenuItems = [
-    { key: '/users', icon: <UserOutlined />, label: <Link to="/users">{t('Users')}</Link> },
-    { key: '/invites', icon: <KeyOutlined />, label: <Link to="/invites">{t('Invite codes')}</Link> },
-    { key: '/audit', icon: <FileSearchOutlined />, label: <Link to="/audit">{t('Audit log')}</Link> },
+  const adminItems = [
+    { key: '/users', icon: <UserOutlined />, label: t('Users') },
+    { key: '/invites', icon: <KeyOutlined />, label: t('Invite codes') },
+    { key: '/audit', icon: <FileSearchOutlined />, label: t('Audit log') },
   ]
 
-  const visibleMenuItems: MenuProps['items'] = isAdmin
-    ? [...menuItems, { type: 'group' as const, label: t('Admin'), children: adminMenuItems }]
-    : menuItems
-
-  const routeKeys = (isAdmin ? [...menuItems, ...adminMenuItems] : menuItems).map((m) => m.key)
-
+  const routeKeys = (isAdmin ? [...navItems, ...adminItems] : navItems).map((m) => m.key)
   const selectedKey =
     routeKeys
-      .filter((k) => (k === '/' ? location.pathname === '/' : location.pathname.startsWith(k)))
+      .filter((k) => (k === '/' ? location.pathname === '/' || location.pathname.startsWith('/domains') : location.pathname.startsWith(k)))
       .sort((a, b) => b.length - a.length)[0] || '/'
 
-  return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        trigger={null}
-        theme={dark ? 'dark' : 'light'}
-        width={220}
-        style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}
-      >
-        <div
-          style={{
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            gap: 10,
-            padding: '0 16px',
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              background: '#f6821f',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: 18,
-              flexShrink: 0,
-            }}
-          >
-            <CloudOutlined />
-          </div>
-          {!collapsed && (
-            <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-0.02em', color: token.colorText }}>
-              CF Tool
-            </span>
-          )}
+  const userMenuItems: MenuProps['items'] = [
+    {
+      key: 'lang',
+      icon: <TranslationOutlined />,
+      label: i18n.language === 'vi' ? 'English' : 'Tiếng Việt',
+    },
+    {
+      key: 'theme',
+      icon: dark ? <BulbFilled /> : <BulbOutlined />,
+      label: dark ? t('Light mode') : t('Dark mode'),
+    },
+    { type: 'divider' as const },
+    { key: 'logout', icon: <LogoutOutlined />, label: t('Logout'), danger: true },
+  ]
+
+  const onUserMenuClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'logout') setToken(null)
+    else if (key === 'lang') i18n.changeLanguage(i18n.language === 'vi' ? 'en' : 'vi')
+    else if (key === 'theme') toggleTheme()
+  }
+
+  const submitFind = () => {
+    const q = find.trim()
+    navigate(q ? `/?q=${encodeURIComponent(q)}` : '/')
+    setFind('')
+    setMobileOpen(false)
+  }
+
+  const sidebarBody = (
+    <div className="flex h-full flex-col">
+      {/* Account switcher (Vercel team-switcher position) */}
+      <div className="flex items-center gap-2 px-3 pt-4 pb-2">
+        <Link to="/" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#f6821f] text-[15px] !text-white">
+          <CloudOutlined />
+        </Link>
+        <div className="min-w-0 flex-1">
+          <AccountSwitcher />
         </div>
-        <Menu
-          theme={dark ? 'dark' : 'light'}
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={visibleMenuItems}
-          style={{ borderInlineEnd: 'none' }}
+      </div>
+
+      {/* Find */}
+      <div className="px-3 pb-3">
+        <Input
+          size="small"
+          prefix={<SearchOutlined className="text-fg-secondary" />}
+          placeholder={t('Find domain…')}
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          onPressEnter={submitFind}
+          allowClear
         />
-      </Sider>
-      <Layout>
-        <Header
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 16px',
-            height: 56,
-            lineHeight: 'normal',
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-            backdropFilter: 'blur(12px)',
-            background: dark ? 'rgba(23,23,28,0.8)' : 'rgba(255,255,255,0.8)',
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          }}
-        >
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3">
+        {navItems.map((item) => (
+          <NavItem key={item.key} to={item.key} icon={item.icon} label={item.label} active={selectedKey === item.key} />
+        ))}
+        {isAdmin && (
+          <>
+            <div className="px-2 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-fg-secondary uppercase dark:text-fg-dark-secondary">
+              Admin
+            </div>
+            {adminItems.map((item) => (
+              <NavItem key={item.key} to={item.key} icon={item.icon} label={item.label} active={selectedKey === item.key} />
+            ))}
+          </>
+        )}
+      </nav>
+
+      {/* User footer */}
+      <div className="border-t border-stroke px-3 py-3 dark:border-stroke-dark">
+        <Dropdown menu={{ items: userMenuItems, onClick: onUserMenuClick }} placement="topLeft">
+          <button className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-black/[0.04] dark:hover:bg-white/[0.06]">
+            <Avatar size={26} style={{ background: 'rgba(246,130,31,0.15)', color: '#f6821f', fontWeight: 600, flexShrink: 0 }}>
+              {email ? email.charAt(0).toUpperCase() : <UserOutlined />}
+            </Avatar>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-fg-secondary dark:text-fg-dark-secondary">{email}</span>
+          </button>
+        </Dropdown>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="flex min-h-screen bg-bg dark:bg-bg-dark">
+      {/* Desktop sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-[230px] shrink-0 border-r border-stroke bg-bg-secondary lg:block dark:border-stroke-dark dark:bg-bg-dark-secondary">
+        {sidebarBody}
+      </aside>
+
+      {/* Mobile sidebar overlay */}
+      {mobileOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/45 lg:hidden" onClick={() => setMobileOpen(false)} />
+          <aside className="fixed inset-y-0 left-0 z-50 w-[260px] border-r border-stroke bg-bg-secondary lg:hidden dark:border-stroke-dark dark:bg-bg-dark-secondary">
+            {sidebarBody}
+          </aside>
+        </>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Mobile top bar */}
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-stroke bg-bg/90 px-3 py-2 backdrop-blur lg:hidden dark:border-stroke-dark dark:bg-bg-dark/90">
           <Button
             type="text"
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed(!collapsed)}
+            icon={mobileOpen ? <CloseOutlined /> : <MenuOutlined />}
+            onClick={() => setMobileOpen((v) => !v)}
+            aria-label="Menu"
           />
-          <div style={{ flex: 1 }} />
-          <AccountSwitcher />
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'vi', label: 'Tiếng Việt' },
-                { key: 'en', label: 'English' },
-              ],
-              selectedKeys: [i18n.language === 'vi' ? 'vi' : 'en'],
-              onClick: ({ key }) => i18n.changeLanguage(key),
-            }}
-          >
-            <Button type="text" icon={<TranslationOutlined />} style={{ marginLeft: 8 }}>
-              {i18n.language === 'vi' ? 'VI' : 'EN'}
-            </Button>
-          </Dropdown>
-          <Tooltip title={dark ? t('Light mode') : t('Dark mode')}>
-            <Button
-              type="text"
-              icon={dark ? <BulbFilled /> : <BulbOutlined />}
-              onClick={toggleTheme}
-              style={{ marginLeft: 4 }}
-            />
-          </Tooltip>
-          <Dropdown
-            menu={{
-              items: [{ key: 'logout', icon: <LogoutOutlined />, label: t('Logout'), danger: true }],
-              onClick: ({ key }) => key === 'logout' && setToken(null),
-            }}
-          >
-            <Avatar
-              size={32}
-              style={{
-                background: 'rgba(246,130,31,0.15)',
-                color: '#f6821f',
-                fontWeight: 600,
-                cursor: 'pointer',
-                marginLeft: 8,
-              }}
-            >
+          <Link to="/" className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#f6821f] text-[15px] !text-white">
+              <CloudOutlined />
+            </span>
+            <span className="text-[15px] font-bold tracking-tight !text-fg dark:!text-fg-dark">CF Tool</span>
+          </Link>
+          <div className="flex-1" />
+          <Dropdown menu={{ items: userMenuItems, onClick: onUserMenuClick }}>
+            <Avatar size={30} style={{ background: 'rgba(246,130,31,0.15)', color: '#f6821f', fontWeight: 600, cursor: 'pointer' }}>
               {email ? email.charAt(0).toUpperCase() : <UserOutlined />}
             </Avatar>
           </Dropdown>
-        </Header>
-        <Content style={{ background: token.colorBgLayout, overflow: 'auto' }}>
-          <div style={{ maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+        </header>
+
+        <main className="min-w-0 flex-1">
+          <div className="mx-auto w-full max-w-[1200px]">
             <Outlet />
           </div>
-        </Content>
-      </Layout>
-    </Layout>
+        </main>
+      </div>
+    </div>
   )
 }
 
@@ -217,11 +264,17 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/" element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
           <Route element={<MainLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="domains" element={<Domains />} />
+            <Route index element={<Domains />} />
+            <Route path="domains" element={<RedirectWithQuery to="/" />} />
             <Route path="domains/:zoneId" element={<DomainDetail />} />
+            <Route path="modern-rules" element={<RedirectZonePage tab="rules" />} />
+            <Route path="rules" element={<RedirectZonePage tab="rules" extraParams={{ sub: 'legacy' }} />} />
+            <Route path="dns" element={<RedirectZonePage tab="dns" />} />
+            <Route path="cache" element={<RedirectZonePage tab="cache" />} />
             <Route path="templates" element={<Templates />} />
-            <Route path="jobs" element={<Jobs />} />
+            <Route path="history" element={<History />} />
+            <Route path="jobs" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'jobs' }} />} />
+            <Route path="changes" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'changes' }} />} />
             <Route path="accounts" element={<Accounts />} />
             <Route path="invites" element={<Invites />} />
             <Route path="users" element={<Users />} />

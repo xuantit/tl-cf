@@ -74,7 +74,7 @@ export default function Users() {
       render: (email: string, r) => (
         <Space>
           <Text strong={r.id === myUserId}>{email}</Text>
-          {r.id === myUserId && <Tag color="orange" bordered={false}>{t('You')}</Tag>}
+          {r.id === myUserId && <Tag color="orange" variant="filled">{t('You')}</Tag>}
         </Space>
       ),
     },
@@ -101,7 +101,7 @@ export default function Users() {
       dataIndex: 'isActive',
       width: 120,
       render: (isActive: boolean) =>
-        isActive ? <Tag color="green" bordered={false}>{t('Active')}</Tag> : <Tag color="red" bordered={false}>{t('Locked')}</Tag>,
+        isActive ? <Tag color="green" variant="filled">{t('Active')}</Tag> : <Tag color="red" variant="filled">{t('Locked')}</Tag>,
     },
     {
       title: t('CF accounts'),
@@ -166,7 +166,7 @@ export default function Users() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
@@ -187,6 +187,7 @@ export default function Users() {
           dataSource={users}
           loading={isLoading}
           pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          scroll={{ x: 'max-content' }}
         />
       </Card>
     </div>

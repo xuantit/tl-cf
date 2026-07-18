@@ -115,7 +115,7 @@ export default function BulkDnsReplaceModal({ open, onClose, onJobCreated, zoneI
       title: t('Content'),
       key: 'content',
       render: (_: unknown, record: PreviewRecord) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text delete type="secondary" style={{ fontFamily: 'monospace' }}>
             {record.content}
           </Text>
@@ -132,9 +132,9 @@ export default function BulkDnsReplaceModal({ open, onClose, onJobCreated, zoneI
       onCancel={handleClose}
       footer={null}
       width={780}
-      destroyOnClose
+      destroyOnHidden
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="large">
+      <Space orientation="vertical" style={{ width: '100%' }} size="large">
         <Steps
           current={step}
           items={[{ title: t('Conditions') }, { title: t('Preview & apply') }]}
@@ -189,7 +189,7 @@ export default function BulkDnsReplaceModal({ open, onClose, onJobCreated, zoneI
         )}
 
         {step === 1 && (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             {matches.length === 0 ? (
               <Empty description={t('No records match the conditions')} />
             ) : (
@@ -208,6 +208,7 @@ export default function BulkDnsReplaceModal({ open, onClose, onJobCreated, zoneI
                     onChange: (keys: Key[]) => setSelectedKeys(keys as string[]),
                   }}
                   pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                  scroll={{ x: 'max-content' }}
                 />
               </>
             )}

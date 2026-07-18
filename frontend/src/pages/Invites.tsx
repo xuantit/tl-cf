@@ -76,7 +76,7 @@ export default function Invites() {
       Modal.success({
         title: t('Invite code created'),
         content: (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Text copyable={{ text: created.code }} strong style={{ fontSize: 18 }}>
               {created.code}
             </Text>
@@ -136,7 +136,7 @@ export default function Invites() {
       width: 120,
       render: (_, r) => {
         const exhausted = r.usedCount >= r.maxUses
-        const tag = <Tag color={exhausted ? 'default' : 'green'} bordered={false}>{r.usedCount}/{r.maxUses}</Tag>
+        const tag = <Tag color={exhausted ? 'default' : 'green'} variant="filled">{r.usedCount}/{r.maxUses}</Tag>
         return r.usedBy.length > 0 ? (
           <Tooltip title={r.usedBy.join(', ')}>{tag}</Tooltip>
         ) : (
@@ -151,7 +151,7 @@ export default function Invites() {
       render: (v: string | null) => {
         if (!v) return <Text type="secondary">{t('No expiry')}</Text>
         const expired = new Date(v) < new Date()
-        return <Tag color={expired ? 'red' : 'blue'} bordered={false}>{new Date(v).toLocaleString(dateLocale)}</Tag>
+        return <Tag color={expired ? 'red' : 'blue'} variant="filled">{new Date(v).toLocaleString(dateLocale)}</Tag>
       },
     },
     {
@@ -179,7 +179,7 @@ export default function Invites() {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
@@ -205,6 +205,7 @@ export default function Invites() {
           dataSource={invites}
           loading={isLoading}
           pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          scroll={{ x: 'max-content' }}
         />
       </Card>
 
@@ -216,7 +217,7 @@ export default function Invites() {
         okText={t('Create')}
         cancelText={t('Cancel')}
         confirmLoading={createMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}

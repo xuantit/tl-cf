@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
-import { Form, Input, Button, Card, Alert } from 'antd'
+import { Form, Input, Button, Card, Alert, message } from 'antd'
 import { UserOutlined, LockOutlined, CloudOutlined, KeyOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
@@ -18,7 +18,8 @@ export default function Register() {
     setErr('')
     try {
       await api.post('/auth/register', v)
-      navigate('/login')
+      message.success(t('Registration successful! Please sign in.'))
+      setTimeout(() => navigate('/login'), 1200)
     } catch (e: unknown) {
       setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('Registration failed'))
     } finally {
