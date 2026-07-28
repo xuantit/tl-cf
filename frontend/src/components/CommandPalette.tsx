@@ -260,4 +260,3 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     </Modal>
   )
 }
-

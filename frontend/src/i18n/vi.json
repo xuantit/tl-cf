@@ -72,7 +72,7 @@
   "Delete this rule?": "Xoá rule này?",
   "Expression": "Biểu thức",
   "Expression is required": "Biểu thức là bắt buộc",
-  "Action": "Action",
+  "Action": "Hành động",
   "Action parameters (JSON)": "Tham số hành động (JSON)",
   "Action parameters must be valid JSON": "Tham số hành động phải là JSON hợp lệ",
   "Action parameters must be valid": "Tham số hành động không hợp lệ",

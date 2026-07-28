@@ -23,6 +23,7 @@ function StatusDot({ active }: { active: boolean }) {
   return (
     <span
       className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-green-500' : 'bg-fg-secondary dark:bg-fg-dark-secondary'}`}
+      aria-label={active ? 'Active' : 'Inactive'}
     />
   )
 }
