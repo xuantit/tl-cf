@@ -531,5 +531,14 @@
   "Disable performance": "Tắt tối ưu hiệu năng",
   "Disable performance optimizations for matching requests.": "Tắt tối ưu hiệu năng cho request phù hợp.",
   "Disable security": "Tắt bảo mật",
-  "Disable security features for matching requests.": "Tắt tính năng bảo mật cho request phù hợp."
+  "Disable security features for matching requests.": "Tắt tính năng bảo mật cho request phù hợp.",
+
+  "Actions": "Hành động",
+  "No data": "Không có dữ liệu",
+  "Loading": "Đang tải",
+  "active": "hoạt động",
+  "pending": "đang chờ",
+  "paused": "tạm dừng",
+  "error": "lỗi",
+  "inactive": "không hoạt động"
 }

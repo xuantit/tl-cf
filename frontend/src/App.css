@@ -1,5 +1,7 @@
 /* Global App Styles — clean minimal */
+/* @deprecated classes below are kept for backward-compat while pages migrate to primitives */
 
+/* @deprecated — use <PageShell> + Tailwind for full-page auth layouts */
 .auth-container {
   min-height: 100vh;
   display: flex;
@@ -13,6 +15,7 @@ body.dark .auth-container {
   background-color: #0a0a0a;
 }
 
+/* @deprecated — use AntD <Card> with borderRadius token (--radius-lg) */
 .auth-card {
   max-width: 400px;
   width: 100%;
@@ -21,6 +24,7 @@ body.dark .auth-container {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
+/* @deprecated — use <PageHeader> from components/ui */
 .page-header {
   margin-bottom: 24px;
 }
@@ -38,9 +42,10 @@ body.dark .auth-container {
   border-bottom-width: 1px;
 }
 
+/* @deprecated — use <StatCard> from components/ui */
 .stat-card {
   cursor: default;
-  transition: transform 0.2s ease, border-color 0.2s ease;
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
 }
 
 .stat-card:hover {
@@ -48,6 +53,7 @@ body.dark .auth-container {
   border-color: #f6821f;
 }
 
+/* @deprecated — use the icon slot inside <StatCard> */
 .icon-chip {
   width: 44px;
   height: 44px;
@@ -59,7 +65,8 @@ body.dark .auth-container {
   flex-shrink: 0;
 }
 
+/* @deprecated — use Tailwind hover:bg-[var(--color-hover)] */
 .hover-row {
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-out);
   cursor: pointer;
 }
