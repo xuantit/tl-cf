@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
-import { Select, Tag, Tooltip } from 'antd'
-import { CloudServerOutlined } from '@ant-design/icons'
+import { Dropdown, Spin } from 'antd'
+import type { MenuProps } from 'antd'
+import { DownOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAccountStore } from '../stores/useAccountStore'
 
@@ -15,8 +17,24 @@ export interface CfAccount {
   domainsCount: number
 }
 
-export default function AccountSwitcher() {
+/** Colour dot indicating account active/inactive state */
+function StatusDot({ active }: { active: boolean }) {
+  // TODO(redesign-pr1): thay bằng primitive StatusDot thật từ PR 1/4
+  return (
+    <span
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-green-500' : 'bg-fg-secondary dark:bg-fg-dark-secondary'}`}
+    />
+  )
+}
+
+interface AccountSwitcherProps {
+  /** When true, show only the initial (for mobile header) */
+  compact?: boolean
+}
+
+export default function AccountSwitcher({ compact = false }: AccountSwitcherProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const activeAccountId = useAccountStore((s) => s.activeAccountId)
   const setActiveAccountId = useAccountStore((s) => s.setActiveAccountId)
@@ -35,44 +53,71 @@ export default function AccountSwitcher() {
     }
   }, [accounts, activeAccountId, setActiveAccountId])
 
-  const handleChange = (id: string) => {
+  const handleSelect = (id: string) => {
     setActiveAccountId(id)
-    // Refetch everything scoped to the active account.
     qc.invalidateQueries()
   }
 
-  if (!isLoading && accounts.length === 0) {
+  const activeAccount = accounts.find((a) => a.id === activeAccountId)
+  const activeLabel = activeAccount
+    ? activeAccount.label || activeAccount.email || activeAccount.id.slice(0, 8)
+    : t('Select account')
+
+  // Derive initial letter for avatar
+  const initial = activeLabel ? activeLabel.charAt(0).toUpperCase() : '?'
+
+  const menuItems: MenuProps['items'] = [
+    ...accounts.map((a) => ({
+      key: a.id,
+      label: (
+        <span className="flex items-center gap-2">
+          <StatusDot active={a.isActive} />
+          <span className="flex-1 truncate">{a.label || a.email || a.id.slice(0, 8)}</span>
+          {a.id === activeAccountId && (
+            <span className="text-[10px] font-semibold text-accent">{t('Active')}</span>
+          )}
+        </span>
+      ),
+      onClick: () => handleSelect(a.id),
+    })),
+    { type: 'divider' as const },
+    {
+      key: 'manage',
+      icon: <SettingOutlined />,
+      label: t('Manage accounts'),
+      onClick: () => navigate('/accounts'),
+    },
+  ]
+
+  if (isLoading) {
+    return <Spin size="small" />
+  }
+
+  if (compact) {
+    // Mobile header: just the initial avatar
     return (
-      <Tag color="warning" style={{ marginRight: 8 }}>
-        {t('No CF account')}
-      </Tag>
+      <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+        <button
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-stroke bg-bg-secondary text-[12px] font-semibold text-fg transition-colors hover:border-accent/40 dark:border-stroke-dark dark:bg-bg-dark-secondary dark:text-fg-dark"
+          aria-label={t('Switch account')}
+        >
+          {initial}
+        </button>
+      </Dropdown>
     )
   }
 
   return (
-    <Tooltip title={t('Active Cloudflare account')}>
-      <Select
-        value={activeAccountId ?? undefined}
-        onChange={handleChange}
-        loading={isLoading}
-        style={{ minWidth: 140, maxWidth: 220, width: '100%' }}
-        placeholder={t('Select account')}
-        options={accounts.map((a) => ({
-          value: a.id,
-          label: (
-            <span>
-              <CloudServerOutlined style={{ marginRight: 6 }} />
-              {a.label || a.email || a.id.slice(0, 8)}
-              <Tag
-                color={a.authType === 'apiToken' ? 'geekblue' : 'default'}
-                style={{ marginLeft: 8 }}
-              >
-                {a.authType === 'apiToken' ? 'Token' : 'Global Key'}
-              </Tag>
-            </span>
-          ),
-        }))}
-      />
-    </Tooltip>
+    <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+      <button className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-stroke bg-bg px-2 py-1.5 text-[13px] transition-colors hover:border-accent/40 dark:border-stroke-dark dark:bg-bg-dark">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-accent/15 text-[10px] font-semibold text-accent">
+          {initial}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left text-fg dark:text-fg-dark">
+          {activeLabel}
+        </span>
+        <DownOutlined className="shrink-0 text-[11px] text-fg-secondary dark:text-fg-dark-secondary" />
+      </button>
+    </Dropdown>
   )
 }
