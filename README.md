@@ -65,6 +65,68 @@ Frontend sẽ chạy tại: http://localhost:5173
 3. Vào "Domains" để xem danh sách domains
 4. Click vào domain để chỉnh sửa DNS, Cache, Rules
 
+## Deploy to VPS (Node.js + Docker Compose)
+
+The backend ships with a production `Dockerfile` and `docker-compose.node.yml`
+(PostgreSQL + backend). The entrypoint runs Drizzle migrations automatically on
+container start.
+
+### 1. Install Docker on the VPS
+
+```bash
+curl -fsSL https://get.docker.com | sh
+docker compose version
+```
+
+### 2. Clone and configure
+
+```bash
+git clone https://github.com/xuantit/tl-cf.git
+cd tl-cf
+```
+
+Create a `.env` file next to `docker-compose.node.yml`:
+
+```env
+POSTGRES_PASSWORD=<strong-password>
+JWT_SECRET=<openssl rand -hex 24>
+ENCRYPTION_KEY=<openssl rand -hex 32>   # 64 hex chars
+CORS_ORIGINS=https://yourdomain.com
+```
+
+### 3. Build and start
+
+```bash
+docker compose -f docker-compose.node.yml up -d --build
+```
+
+Migrations run automatically at startup. A default admin
+(`admin@example.com` / `Admin@123`) is seeded on first run - change it after
+first login.
+
+### 4. Frontend
+
+Build the static site with the API URL baked in, then serve `dist/` (e.g. with
+Nginx):
+
+```bash
+cd frontend
+npm ci
+VITE_API_URL=https://yourdomain.com/api npm run build
+```
+
+### 5. Reverse proxy + HTTPS
+
+Put Nginx in front: serve `frontend/dist` at `/`, proxy `/api` to
+`http://127.0.0.1:9000`, then issue a certificate with `certbot --nginx`.
+
+### 6. Database backup
+
+```bash
+docker compose -f docker-compose.node.yml exec postgres \
+  pg_dump -U postgres cftool > backup_$(date +%F).sql
+```
+
 ## Quick Start (Legacy Python Backend)
 
 ### Backend

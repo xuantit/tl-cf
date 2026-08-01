@@ -1,9 +1,10 @@
-﻿services:
+services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: cftool
     ports:
       - "5433:5432"
@@ -17,20 +18,19 @@
 
   node-backend:
     build: ./node-backend
+    restart: unless-stopped
     ports:
       - "9000:9000"
     environment:
+      NODE_ENV: production
       PORT: 9000
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cftool
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/cftool
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-16-chars}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
-      CORS_ORIGINS: http://localhost:5173
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./node-backend:/app
-      - /app/node_modules
 
 volumes:
   postgres_data:
