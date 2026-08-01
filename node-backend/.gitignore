@@ -6,7 +6,7 @@ logs/
 config/accounts.json
 config/backups/
 
-# Prisma / SQLite
+# Prisma / SQLite (legacy)
 prisma/data/
 *.db
 *.db-journal

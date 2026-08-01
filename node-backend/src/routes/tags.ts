@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
+import { and, asc, eq } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { tagRules, tags } from "../db/schema.js";
 import { aggregateTags, deleteTag, matchTagRules, renameTag } from "../services/tags.js";
 import { sendApiError } from "../utils/apiError.js";
 import logger from "../utils/logger.js";
@@ -33,9 +35,9 @@ function firstIssue(error: z.ZodError): string {
 
 tagsRouter.get("/rules", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const rules = await prisma.tagRule.findMany({
-    where: { userId: auth.userId },
-    orderBy: { createdAt: "asc" },
+  const rules = await db.query.tagRules.findMany({
+    where: eq(tagRules.userId, auth.userId),
+    orderBy: asc(tagRules.createdAt),
   });
   res.json(rules);
 });
@@ -46,9 +48,10 @@ tagsRouter.post("/rules", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ detail: firstIssue(parsed.error) });
   }
-  const rule = await prisma.tagRule.create({
-    data: { userId: auth.userId, ...parsed.data },
-  });
+  const [rule] = await db
+    .insert(tagRules)
+    .values({ userId: auth.userId, ...parsed.data })
+    .returning();
   res.status(201).json(rule);
 });
 
@@ -57,8 +60,8 @@ tagsRouter.post("/rules/:id/preview", async (req, res) => {
   const accountId = req.query.accountId as string | undefined;
   const label = req.query.label as string | undefined;
 
-  const rule = await prisma.tagRule.findFirst({
-    where: { id: req.params.id, userId: auth.userId },
+  const rule = await db.query.tagRules.findFirst({
+    where: and(eq(tagRules.id, req.params.id), eq(tagRules.userId, auth.userId)),
   });
   if (!rule) {
     return res.status(404).json({ detail: "Tag rule not found" });
@@ -89,28 +92,25 @@ tagsRouter.put("/rules/:id", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ detail: firstIssue(parsed.error) });
   }
-  const existing = await prisma.tagRule.findFirst({
-    where: { id: req.params.id, userId: auth.userId },
+  const existing = await db.query.tagRules.findFirst({
+    where: and(eq(tagRules.id, req.params.id), eq(tagRules.userId, auth.userId)),
   });
   if (!existing) {
     return res.status(404).json({ detail: "Tag rule not found" });
   }
-  const rule = await prisma.tagRule.update({
-    where: { id: existing.id },
-    data: parsed.data,
-  });
+  const [rule] = await db.update(tagRules).set(parsed.data).where(eq(tagRules.id, existing.id)).returning();
   res.json(rule);
 });
 
 tagsRouter.delete("/rules/:id", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const existing = await prisma.tagRule.findFirst({
-    where: { id: req.params.id, userId: auth.userId },
+  const existing = await db.query.tagRules.findFirst({
+    where: and(eq(tagRules.id, req.params.id), eq(tagRules.userId, auth.userId)),
   });
   if (!existing) {
     return res.status(404).json({ detail: "Tag rule not found" });
   }
-  await prisma.tagRule.delete({ where: { id: existing.id } });
+  await db.delete(tagRules).where(eq(tagRules.id, existing.id));
   res.json({ deleted: true });
 });
 
@@ -120,8 +120,8 @@ tagsRouter.delete("/rules/:id", async (req, res) => {
 tagsRouter.get("/", async (req, res) => {
   const auth = req.auth as AuthUser;
   const accountId = req.query.accountId as string | undefined;
-  const tags = await aggregateTags(auth.userId, accountId);
-  res.json(tags);
+  const aggregated = await aggregateTags(auth.userId, accountId);
+  res.json(aggregated);
 });
 
 // Create tag metadata (membership is managed via PUT /domains/:zoneId/tags)
@@ -137,17 +137,19 @@ tagsRouter.post("/", async (req, res) => {
     return res.status(400).json({ detail: firstIssue(parsed.error) });
   }
   try {
-    const tag = await prisma.tag.create({
-      data: {
+    const [tag] = await db
+      .insert(tags)
+      .values({
         userId: auth.userId,
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         templateId: parsed.data.templateId ?? null,
-      },
-    });
+      })
+      .returning();
     res.status(201).json(tag);
   } catch (error: any) {
-    if (error?.code === "P2002") {
+    // Postgres unique_violation
+    if (error?.code === "23505" || error?.cause?.code === "23505") {
       return res.status(409).json({ detail: `Tag "${parsed.data.name}" already exists` });
     }
     throw error;
@@ -177,19 +179,21 @@ tagsRouter.put("/:name", async (req, res) => {
   }
 
   if (body.description !== undefined || body.templateId !== undefined) {
-    await prisma.tag.upsert({
-      where: { userId_name: { userId: auth.userId, name: finalName } },
-      create: {
+    await db
+      .insert(tags)
+      .values({
         userId: auth.userId,
         name: finalName,
         description: body.description ?? null,
         templateId: body.templateId ?? null,
-      },
-      update: {
-        ...(body.description !== undefined ? { description: body.description } : {}),
-        ...(body.templateId !== undefined ? { templateId: body.templateId } : {}),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [tags.userId, tags.name],
+        set: {
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.templateId !== undefined ? { templateId: body.templateId } : {}),
+        },
+      });
   }
 
   logger.info("Tag updated", { userId: auth.userId, from: name, to: finalName, affectedDomains });

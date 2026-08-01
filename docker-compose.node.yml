@@ -1,17 +1,16 @@
-services:
-  mysql:
-    image: mysql:8.0
+﻿services:
+  postgres:
+    image: postgres:17-alpine
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: cftool
-      MYSQL_USER: cftool
-      MYSQL_PASSWORD: cftoolpass
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cftool
     ports:
-      - "3307:3306"
+      - "5433:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cftool"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,16 +21,16 @@ services:
       - "9000:9000"
     environment:
       PORT: 9000
-      DATABASE_URL: mysql://cftool:cftoolpass@mysql:3306/cftool
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cftool
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-16-chars}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       CORS_ORIGINS: http://localhost:5173
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     volumes:
       - ./node-backend:/app
       - /app/node_modules
 
 volumes:
-  mysql_data:
+  postgres_data:

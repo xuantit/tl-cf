@@ -2,11 +2,14 @@ import request from "supertest";
 import bcrypt from "bcryptjs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { eq, inArray } from "drizzle-orm";
+
 import { app } from "../src/app.js";
 import { clearDashboardCache } from "../src/routes/dashboard.js";
 import { cloudflareService, type Zone } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { bulkJobs, changeItems, changeSets, cloudflareAccounts, domains, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const email = `dashboard-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
@@ -28,9 +31,7 @@ const zones: Zone[] = [
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, role: "user" },
-  });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
 
   const account = await configService.addAccount({
@@ -42,52 +43,50 @@ beforeAll(async () => {
   accountId = account.id;
 
   // Domains: one sslMode off, one full, one without settings
-  await prisma.domain.createMany({
-    data: [
-      {
-        accountId,
-        name: "a.com",
-        zoneId: "zone-a",
-        status: "active",
-        settingsJson: JSON.stringify({ sslMode: "off", tags: ["prod"] }),
-      },
-      {
-        accountId,
-        name: "b.com",
-        zoneId: "zone-b",
-        status: "active",
-        settingsJson: JSON.stringify({ sslMode: "full", tags: ["prod", "eu"] }),
-      },
-      { accountId, name: "c.com", zoneId: "zone-c", status: "pending" },
-    ],
-  });
+  await db.insert(domains).values([
+    {
+      accountId,
+      name: "a.com",
+      zoneId: "zone-a",
+      status: "active",
+      settingsJson: JSON.stringify({ sslMode: "off", tags: ["prod"] }),
+    },
+    {
+      accountId,
+      name: "b.com",
+      zoneId: "zone-b",
+      status: "active",
+      settingsJson: JSON.stringify({ sslMode: "full", tags: ["prod", "eu"] }),
+    },
+    { accountId, name: "c.com", zoneId: "zone-c", status: "pending" },
+  ]);
 
   // ChangeSets: newest first should be dns-update with 2 items
-  const older = await prisma.changeSet.create({
-    data: {
+  const [older] = await db
+    .insert(changeSets)
+    .values({
       ownerId: userId,
       accountId,
       zoneId: "zone-b",
       action: "purge-cache",
       status: "done",
       createdAt: new Date(Date.now() - 60_000),
-    },
-  });
-  const newer = await prisma.changeSet.create({
-    data: {
+    })
+    .returning();
+  const [newer] = await db
+    .insert(changeSets)
+    .values({
       ownerId: userId,
       accountId,
       zoneId: "zone-a",
       action: "dns-update",
       status: "done",
-      items: {
-        create: [
-          { resourceType: "dns_record", resourceId: "rec-1" },
-          { resourceType: "dns_record", resourceId: "rec-2" },
-        ],
-      },
-    },
-  });
+    })
+    .returning();
+  await db.insert(changeItems).values([
+    { changeSetId: newer.id, resourceType: "dns_record", resourceId: "rec-1" },
+    { changeSetId: newer.id, resourceType: "dns_record", resourceId: "rec-2" },
+  ]);
   changeSetIds.push(older.id, newer.id);
 
   // BulkJobs: two inside the 7d window, one outside (excluded)
@@ -128,7 +127,7 @@ beforeAll(async () => {
     },
   ];
   for (const data of jobsData) {
-    const job = await prisma.bulkJob.create({ data });
+    const [job] = await db.insert(bulkJobs).values(data).returning();
     jobIds.push(job.id);
   }
 
@@ -138,10 +137,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.bulkJob.deleteMany({ where: { id: { in: jobIds } } });
-  await prisma.changeSet.deleteMany({ where: { id: { in: changeSetIds } } });
-  await prisma.cloudflareAccount.deleteMany({ where: { id: accountId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await db.delete(bulkJobs).where(inArray(bulkJobs.id, jobIds));
+  await db.delete(changeSets).where(inArray(changeSets.id, changeSetIds));
+  await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
+  await db.delete(users).where(eq(users.id, userId));
 });
 
 beforeEach(() => {

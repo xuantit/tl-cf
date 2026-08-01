@@ -1,4 +1,7 @@
-import { prisma } from "./db.js";
+import { and, eq } from "drizzle-orm";
+
+import { db } from "./db.js";
+import { cloudflareAccounts, domains, tags } from "../db/schema.js";
 
 // Tag membership lives inside Domain.settingsJson (DomainSettings.tags); the Tag
 // table only stores per-user metadata (description, templateId). TagRule rows
@@ -20,8 +23,23 @@ export interface TagRuleLike {
   enabled?: boolean;
 }
 
-function domainScope(userId: string, accountId?: string) {
-  return { account: { userId, ...(accountId ? { id: accountId } : {}) } };
+// Domains scoped to a user (optionally one account) — join qua CloudflareAccount
+function domainScopeWhere(userId: string, accountId?: string) {
+  return accountId
+    ? and(eq(cloudflareAccounts.userId, userId), eq(cloudflareAccounts.id, accountId))
+    : eq(cloudflareAccounts.userId, userId);
+}
+
+async function findScopedDomains(
+  dbOrTx: Pick<typeof db, "select">,
+  userId: string,
+  accountId?: string,
+): Promise<{ id: string; settingsJson: string | null }[]> {
+  return dbOrTx
+    .select({ id: domains.id, settingsJson: domains.settingsJson })
+    .from(domains)
+    .innerJoin(cloudflareAccounts, eq(domains.accountId, cloudflareAccounts.id))
+    .where(domainScopeWhere(userId, accountId));
 }
 
 function parseTags(settingsJson: string | null): string[] {
@@ -66,16 +84,13 @@ export async function aggregateTags(
   userId: string,
   accountId?: string,
 ): Promise<AggregatedTag[]> {
-  const [domains, metadata] = await Promise.all([
-    prisma.domain.findMany({
-      where: domainScope(userId, accountId),
-      select: { settingsJson: true },
-    }),
-    prisma.tag.findMany({ where: { userId } }),
+  const [domainRows, metadata] = await Promise.all([
+    findScopedDomains(db, userId, accountId),
+    db.query.tags.findMany({ where: eq(tags.userId, userId) }),
   ]);
 
   const result = new Map<string, AggregatedTag>();
-  for (const domain of domains) {
+  for (const domain of domainRows) {
     for (const name of parseTags(domain.settingsJson)) {
       const entry = result.get(name);
       if (entry) entry.domainCount += 1;
@@ -109,34 +124,31 @@ export async function renameTag(
   from: string,
   to: string,
 ): Promise<number> {
-  return prisma.$transaction(async (tx) => {
-    const domains = await tx.domain.findMany({
-      where: domainScope(userId, accountId),
-      select: { id: true, settingsJson: true },
-    });
+  return db.transaction(async (tx) => {
+    const domainRows = await findScopedDomains(tx, userId, accountId);
     let affected = 0;
-    for (const domain of domains) {
-      const updated = transformTags(domain.settingsJson, (tags) =>
-        tags.includes(from) ? [...new Set(tags.map((tag) => (tag === from ? to : tag)))] : tags,
+    for (const domain of domainRows) {
+      const updated = transformTags(domain.settingsJson, (tagList) =>
+        tagList.includes(from) ? [...new Set(tagList.map((tag) => (tag === from ? to : tag)))] : tagList,
       );
       if (updated !== null) {
-        await tx.domain.update({ where: { id: domain.id }, data: { settingsJson: updated } });
+        await tx.update(domains).set({ settingsJson: updated }).where(eq(domains.id, domain.id));
         affected += 1;
       }
     }
 
     // Move metadata: if a row for `to` already exists, merge (drop the old row)
-    const fromMeta = await tx.tag.findUnique({
-      where: { userId_name: { userId, name: from } },
+    const fromMeta = await tx.query.tags.findFirst({
+      where: and(eq(tags.userId, userId), eq(tags.name, from)),
     });
     if (fromMeta) {
-      const toMeta = await tx.tag.findUnique({
-        where: { userId_name: { userId, name: to } },
+      const toMeta = await tx.query.tags.findFirst({
+        where: and(eq(tags.userId, userId), eq(tags.name, to)),
       });
       if (toMeta) {
-        await tx.tag.delete({ where: { id: fromMeta.id } });
+        await tx.delete(tags).where(eq(tags.id, fromMeta.id));
       } else {
-        await tx.tag.update({ where: { id: fromMeta.id }, data: { name: to } });
+        await tx.update(tags).set({ name: to }).where(eq(tags.id, fromMeta.id));
       }
     }
     return affected;
@@ -150,22 +162,19 @@ export async function deleteTag(
   accountId: string | undefined,
   name: string,
 ): Promise<number> {
-  return prisma.$transaction(async (tx) => {
-    const domains = await tx.domain.findMany({
-      where: domainScope(userId, accountId),
-      select: { id: true, settingsJson: true },
-    });
+  return db.transaction(async (tx) => {
+    const domainRows = await findScopedDomains(tx, userId, accountId);
     let affected = 0;
-    for (const domain of domains) {
-      const updated = transformTags(domain.settingsJson, (tags) =>
-        tags.filter((tag) => tag !== name),
+    for (const domain of domainRows) {
+      const updated = transformTags(domain.settingsJson, (tagList) =>
+        tagList.filter((tag) => tag !== name),
       );
       if (updated !== null) {
-        await tx.domain.update({ where: { id: domain.id }, data: { settingsJson: updated } });
+        await tx.update(domains).set({ settingsJson: updated }).where(eq(domains.id, domain.id));
         affected += 1;
       }
     }
-    await tx.tag.deleteMany({ where: { userId, name } });
+    await tx.delete(tags).where(and(eq(tags.userId, userId), eq(tags.name, name)));
     return affected;
   });
 }

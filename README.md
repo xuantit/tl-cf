@@ -4,9 +4,9 @@ Tool to automate Cloudflare: manage domains, DNS records, cache settings, and ru
 
 ## Stack (New - Node.js)
 
-- **Backend:** Node.js, Express, Prisma, MySQL
+- **Backend:** Node.js, Express, Drizzle ORM, PostgreSQL
 - **Frontend:** React, TypeScript, Vite, Ant Design, TanStack Query, Zustand
-- **Database:** MySQL
+- **Database:** PostgreSQL
 - **Authentication:** JWT
 - **Encryption:** AES-256-GCM for API keys
 
@@ -17,13 +17,13 @@ Tool to automate Cloudflare: manage domains, DNS records, cache settings, and ru
 
 ## Quick Start (Node.js Backend - Recommended)
 
-### 1. Setup MySQL
+### 1. Setup PostgreSQL
 
 ```bash
-docker-compose -f docker-compose.node.yml up -d mysql
+docker-compose -f docker-compose.node.yml up -d postgres
 ```
 
-Hoặc dùng MySQL local, tạo database `cftool`.
+Hoặc dùng PostgreSQL local, tạo database `cftool`.
 
 ### 2. Setup Backend
 
@@ -32,13 +32,11 @@ cd node-backend
 npm install
 
 # Tạo file .env từ .env.example và điền thông tin
+# DATABASE_URL=postgresql://postgres:postgres@localhost:5433/cftool
 # Tạo ENCRYPTION_KEY: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 # Chạy migrations
-npm run prisma:migrate
-
-# Generate Prisma client
-npm run prisma:generate
+npm run db:migrate
 
 # Chạy server
 npm run dev

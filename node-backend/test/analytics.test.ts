@@ -2,11 +2,14 @@ import request from "supertest";
 import bcrypt from "bcryptjs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { eq } from "drizzle-orm";
+
 import { app } from "../src/app.js";
 import { clearAnalyticsCache } from "../src/services/analytics.js";
 import { CloudflareError, cloudflareService, type Zone } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { cloudflareAccounts, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const email = `analytics-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
@@ -66,9 +69,7 @@ function mockGraphqlOk() {
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, role: "user" },
-  });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
 
   const account = await configService.addAccount({
@@ -85,8 +86,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.cloudflareAccount.deleteMany({ where: { id: accountId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
+  await db.delete(users).where(eq(users.id, userId));
 });
 
 beforeEach(() => {

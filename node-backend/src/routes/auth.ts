@@ -4,10 +4,12 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
 
 import { findUserByEmail, createUser } from "../models/userJson.js";
 import { requireAuth } from "../middleware/auth.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { inviteCodes, sessions, users } from "../db/schema.js";
 import { env } from "../utils/env.js";
 import logger from "../utils/logger.js";
 
@@ -51,7 +53,9 @@ authRouter.post("/register", async (req, res) => {
     });
     const body = bodySchema.parse(req.body);
 
-    const invite = await prisma.inviteCode.findUnique({ where: { code: body.inviteCode.trim() } });
+    const invite = await db.query.inviteCodes.findFirst({
+      where: eq(inviteCodes.code, body.inviteCode.trim()),
+    });
     if (!invite) {
       logger.warn("Registration with invalid invite code", { email: body.email });
       return res.status(403).json({ detail: "Mã mời không hợp lệ" });
@@ -70,11 +74,12 @@ authRouter.post("/register", async (req, res) => {
     }
 
     // Tăng usedCount atomic — nếu 2 request cùng lúc vượt maxUses thì request sau fail
-    const claimed = await prisma.inviteCode.updateMany({
-      where: { id: invite.id, usedCount: { lt: invite.maxUses } },
-      data: { usedCount: { increment: 1 } },
-    });
-    if (claimed.count === 0) {
+    const claimed = await db
+      .update(inviteCodes)
+      .set({ usedCount: sql`${inviteCodes.usedCount} + 1` })
+      .where(and(eq(inviteCodes.id, invite.id), lt(inviteCodes.usedCount, invite.maxUses)))
+      .returning({ id: inviteCodes.id });
+    if (claimed.length === 0) {
       return res.status(403).json({ detail: "Mã mời đã được dùng hết" });
     }
 
@@ -83,14 +88,14 @@ authRouter.post("/register", async (req, res) => {
 
     // Ghi lại email đã dùng code (best-effort)
     try {
-      const fresh = await prisma.inviteCode.findUnique({ where: { id: invite.id } });
+      const fresh = await db.query.inviteCodes.findFirst({ where: eq(inviteCodes.id, invite.id) });
       if (fresh) {
         const usedBy = JSON.parse(fresh.usedByJson) as string[];
         usedBy.push(user.email);
-        await prisma.inviteCode.update({
-          where: { id: invite.id },
-          data: { usedByJson: JSON.stringify(usedBy) },
-        });
+        await db
+          .update(inviteCodes)
+          .set({ usedByJson: JSON.stringify(usedBy) })
+          .where(eq(inviteCodes.id, invite.id));
       }
     } catch (e) {
       logger.warn("Failed to record invite usage", { inviteId: invite.id, error: (e as Error).message });
@@ -124,9 +129,9 @@ authRouter.post("/login", async (req, res) => {
       return res.status(401).json({ detail: "Invalid credentials" });
     }
 
-    const fresh = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { isActive: true, role: true, displayName: true },
+    const fresh = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { isActive: true, role: true, displayName: true },
     });
     if (!fresh?.isActive) {
       logger.warn("Login attempt on locked account", { email: body.email, userId: user.id });
@@ -139,13 +144,11 @@ authRouter.post("/login", async (req, res) => {
       expiresIn: "7d",
     });
 
-    await prisma.session.create({
-      data: {
-        userId: user.id,
-        jti,
-        userAgent: req.headers["user-agent"]?.slice(0, 200) ?? null,
-        ip: req.ip ?? null,
-      },
+    await db.insert(sessions).values({
+      userId: user.id,
+      jti,
+      userAgent: req.headers["user-agent"]?.slice(0, 200) ?? null,
+      ip: req.ip ?? null,
     });
 
     logger.info("User logged in", { userId: user.id, email: user.email, role: fresh.role });
@@ -160,9 +163,9 @@ authRouter.post("/login", async (req, res) => {
 });
 
 authRouter.get("/me", requireAuth, async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.auth!.userId },
-    select: { id: true, email: true, role: true, displayName: true, createdAt: true },
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, req.auth!.userId),
+    columns: { id: true, email: true, role: true, displayName: true, createdAt: true },
   });
   if (!user) return res.status(401).json({ detail: "Invalid token" });
 
@@ -185,11 +188,17 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
   }
 
   const displayName = parsed.data.displayName === "" ? null : parsed.data.displayName;
-  const user = await prisma.user.update({
-    where: { id: req.auth!.userId },
-    data: { displayName },
-    select: { id: true, email: true, role: true, displayName: true, createdAt: true },
-  });
+  const [user] = await db
+    .update(users)
+    .set({ displayName })
+    .where(eq(users.id, req.auth!.userId))
+    .returning({
+      id: users.id,
+      email: users.email,
+      role: users.role,
+      displayName: users.displayName,
+      createdAt: users.createdAt,
+    });
 
   logger.info("User profile updated", { userId: user.id });
   res.json({
@@ -211,9 +220,9 @@ authRouter.post("/change-password", requireAuth, async (req, res) => {
     return res.status(400).json({ detail: parsed.error.issues[0]?.message || "Invalid body" });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: req.auth!.userId },
-    select: { id: true, passwordHash: true },
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, req.auth!.userId),
+    columns: { id: true, passwordHash: true },
   });
   if (!user) return res.status(401).json({ detail: "Invalid token" });
 
@@ -224,21 +233,21 @@ authRouter.post("/change-password", requireAuth, async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
 
   logger.info("User changed password", { userId: user.id });
   res.json({ ok: true });
 });
 
 authRouter.get("/sessions", requireAuth, async (req, res) => {
-  const sessions = await prisma.session.findMany({
-    where: { userId: req.auth!.userId, revokedAt: null },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, jti: true, userAgent: true, ip: true, createdAt: true, lastSeenAt: true },
+  const rows = await db.query.sessions.findMany({
+    where: and(eq(sessions.userId, req.auth!.userId), isNull(sessions.revokedAt)),
+    orderBy: desc(sessions.createdAt),
+    columns: { id: true, jti: true, userAgent: true, ip: true, createdAt: true, lastSeenAt: true },
   });
 
   res.json(
-    sessions.map((s) => ({
+    rows.map((s) => ({
       id: s.id,
       userAgent: s.userAgent,
       ip: s.ip,
@@ -251,26 +260,32 @@ authRouter.get("/sessions", requireAuth, async (req, res) => {
 
 // Thu hồi mọi phiên khác (giữ phiên hiện tại) — đặt TRƯỚC /sessions/:id
 authRouter.delete("/sessions", requireAuth, async (req, res) => {
-  const result = await prisma.session.updateMany({
-    where: {
-      userId: req.auth!.userId,
-      revokedAt: null,
-      ...(req.auth!.jti ? { jti: { not: req.auth!.jti } } : {}),
-    },
-    data: { revokedAt: new Date() },
-  });
+  const revokedRows = await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.userId, req.auth!.userId),
+        isNull(sessions.revokedAt),
+        ...(req.auth!.jti ? [ne(sessions.jti, req.auth!.jti)] : []),
+      ),
+    )
+    .returning({ id: sessions.id });
 
-  logger.info("User revoked all other sessions", { userId: req.auth!.userId, revoked: result.count });
-  res.json({ revoked: result.count });
+  logger.info("User revoked all other sessions", { userId: req.auth!.userId, revoked: revokedRows.length });
+  res.json({ revoked: revokedRows.length });
 });
 
 authRouter.delete("/sessions/:id", requireAuth, async (req, res) => {
   const sessionId = String(req.params.id);
-  const result = await prisma.session.updateMany({
-    where: { id: sessionId, userId: req.auth!.userId, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
-  if (result.count === 0) {
+  const revokedRows = await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(eq(sessions.id, sessionId), eq(sessions.userId, req.auth!.userId), isNull(sessions.revokedAt)),
+    )
+    .returning({ id: sessions.id });
+  if (revokedRows.length === 0) {
     return res.status(404).json({ detail: "Không tìm thấy phiên đăng nhập" });
   }
 

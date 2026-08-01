@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { prisma } from "./db.js";
+import { desc, eq } from "drizzle-orm";
+
+import { db } from "./db.js";
+import { bulkJobs } from "../db/schema.js";
 import logger from "../utils/logger.js";
 
 export type BulkJobItemStatus = "pending" | "running" | "success" | "error";
@@ -58,11 +61,10 @@ async function persistJob(job: BulkJob): Promise<void> {
       itemsJson: JSON.stringify(job.items),
       finishedAt: job.finishedAt ? new Date(job.finishedAt) : null,
     };
-    await prisma.bulkJob.upsert({
-      where: { id: job.id },
-      create: { id: job.id, createdAt: new Date(job.createdAt), ...data },
-      update: data,
-    });
+    await db
+      .insert(bulkJobs)
+      .values({ id: job.id, createdAt: new Date(job.createdAt), ...data })
+      .onConflictDoUpdate({ target: bulkJobs.id, set: data });
     lastPersistAt.set(job.id, Date.now());
   } catch (error: any) {
     logger.error("Failed to persist bulk job", { jobId: job.id, error: error?.message });
@@ -113,12 +115,13 @@ function jobFromDbRecord(record: {
 /** Mark jobs left in "running" state by a previous process as interrupted. */
 export async function recoverInterruptedJobs(): Promise<void> {
   try {
-    const result = await prisma.bulkJob.updateMany({
-      where: { status: "running" },
-      data: { status: "interrupted", finishedAt: new Date() },
-    });
-    if (result.count > 0) {
-      logger.warn("Marked interrupted bulk jobs from previous run", { count: result.count });
+    const result = await db
+      .update(bulkJobs)
+      .set({ status: "interrupted", finishedAt: new Date() })
+      .where(eq(bulkJobs.status, "running"))
+      .returning({ id: bulkJobs.id });
+    if (result.length > 0) {
+      logger.warn("Marked interrupted bulk jobs from previous run", { count: result.length });
     }
   } catch (error: any) {
     logger.error("Failed to recover interrupted jobs", { error: error?.message });
@@ -215,15 +218,15 @@ export function getJob(id: string): BulkJob | undefined {
 export async function getJobWithHistory(id: string): Promise<BulkJob | undefined> {
   const inMemory = jobs.get(id);
   if (inMemory) return inMemory;
-  const record = await prisma.bulkJob.findUnique({ where: { id } });
+  const record = await db.query.bulkJobs.findFirst({ where: eq(bulkJobs.id, id) });
   return record ? jobFromDbRecord(record) : undefined;
 }
 
 export async function listJobs(ownerId: string, limit = 50): Promise<BulkJob[]> {
-  const records = await prisma.bulkJob.findMany({
-    where: { ownerId },
-    orderBy: { createdAt: "desc" },
-    take: limit,
+  const records = await db.query.bulkJobs.findMany({
+    where: eq(bulkJobs.ownerId, ownerId),
+    orderBy: desc(bulkJobs.createdAt),
+    limit,
   });
   return records.map(jobFromDbRecord);
 }

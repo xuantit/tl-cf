@@ -2,8 +2,11 @@ import bcrypt from "bcryptjs";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { eq } from "drizzle-orm";
+
 import { app } from "../src/app.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { users } from "../src/db/schema.js";
 
 const email = `profile-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 const password = "InitialPass123";
@@ -18,9 +21,7 @@ async function login(pass: string) {
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, role: "user" },
-  });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
 
   const res = await login(password);
@@ -29,7 +30,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await db.delete(users).where(eq(users.id, userId));
 });
 
 describe("auth profile", () => {

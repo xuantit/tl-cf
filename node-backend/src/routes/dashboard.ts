@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { and, asc, count, desc, eq, gte, sum } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
 import { DomainSettingsSchema } from "../models/configAccount.js";
 import { cloudflareService, type Zone } from "../services/cloudflare.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { bulkJobs, changeSets, cloudflareAccounts, domains } from "../db/schema.js";
 import { sendApiError } from "../utils/apiError.js";
 import { getCredentials } from "./cf.js";
 
@@ -63,42 +65,40 @@ dashboardRouter.get("/summary", async (req, res) => {
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [zones, domainRows, accountRows, recentChangeRows, jobsAggregate] = await Promise.all([
+    const [zones, domainRows, accountRows, recentChangeRows, jobsAggregateRows] = await Promise.all([
       getZonesCached(auth.userId, accountId, label),
-      prisma.domain.findMany({
-        where: { account: { userId: auth.userId, ...(accountId ? { id: accountId } : {}) } },
-        select: { settingsJson: true },
+      db
+        .select({ settingsJson: domains.settingsJson })
+        .from(domains)
+        .innerJoin(cloudflareAccounts, eq(domains.accountId, cloudflareAccounts.id))
+        .where(
+          accountId
+            ? and(eq(cloudflareAccounts.userId, auth.userId), eq(cloudflareAccounts.id, accountId))
+            : eq(cloudflareAccounts.userId, auth.userId),
+        ),
+      db.query.cloudflareAccounts.findMany({
+        where: eq(cloudflareAccounts.userId, auth.userId),
+        columns: { id: true, label: true, authType: true, isActive: true },
+        with: { domains: { columns: { id: true } } },
+        orderBy: asc(cloudflareAccounts.createdAt),
       }),
-      prisma.cloudflareAccount.findMany({
-        where: { userId: auth.userId },
-        select: {
-          id: true,
-          label: true,
-          authType: true,
-          isActive: true,
-          _count: { select: { domains: true } },
-        },
-        orderBy: { createdAt: "asc" },
+      db.query.changeSets.findMany({
+        where: eq(changeSets.ownerId, auth.userId),
+        orderBy: desc(changeSets.createdAt),
+        limit: 10,
+        columns: { id: true, action: true, status: true, zoneId: true, createdAt: true },
+        with: { items: { columns: { id: true } } },
       }),
-      prisma.changeSet.findMany({
-        where: { ownerId: auth.userId },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-        select: {
-          id: true,
-          action: true,
-          status: true,
-          zoneId: true,
-          createdAt: true,
-          _count: { select: { items: true } },
-        },
-      }),
-      prisma.bulkJob.aggregate({
-        where: { ownerId: auth.userId, createdAt: { gte: sevenDaysAgo } },
-        _count: { _all: true },
-        _sum: { succeeded: true, failed: true },
-      }),
+      db
+        .select({
+          total: count(),
+          succeeded: sum(bulkJobs.succeeded),
+          failed: sum(bulkJobs.failed),
+        })
+        .from(bulkJobs)
+        .where(and(eq(bulkJobs.ownerId, auth.userId), gte(bulkJobs.createdAt, sevenDaysAgo))),
     ]);
+    const jobsAggregate = jobsAggregateRows[0];
 
     // Zone status breakdown
     let active = 0;
@@ -147,19 +147,19 @@ dashboardRouter.get("/summary", async (req, res) => {
         status: change.status,
         zoneId: change.zoneId,
         createdAt: change.createdAt,
-        itemCount: change._count.items,
+        itemCount: change.items.length,
       })),
       jobs7d: {
-        total: jobsAggregate._count._all,
-        succeeded: jobsAggregate._sum.succeeded ?? 0,
-        failed: jobsAggregate._sum.failed ?? 0,
+        total: jobsAggregate.total,
+        succeeded: Number(jobsAggregate.succeeded ?? 0),
+        failed: Number(jobsAggregate.failed ?? 0),
       },
       accounts: accountRows.map((account) => ({
         id: account.id,
         label: account.label,
         authType: account.authType,
         isActive: account.isActive,
-        domainCount: account._count.domains,
+        domainCount: account.domains.length,
       })),
     });
   } catch (error) {

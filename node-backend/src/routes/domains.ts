@@ -7,7 +7,9 @@ import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import { configService } from "../services/configService.js";
 import { createChangeSet, type ChangeItemPayload } from "../services/changes.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { tagRules as tagRulesTable } from "../db/schema.js";
+import { and, eq } from "drizzle-orm";
 import { matchTagRules } from "../services/tags.js";
 import { sendApiError } from "../utils/apiError.js";
 import { isCloudflareError } from "../services/cloudflare.js";
@@ -131,8 +133,8 @@ domainsRouter.get("/", async (req, res) => {
     // Auto-tag on read: merge enabled TagRule matches into each zone's tags.
     // Never persisted — rules are re-evaluated on every request.
     try {
-      const tagRules = await prisma.tagRule.findMany({
-        where: { userId: auth.userId, enabled: true },
+      const tagRules = await db.query.tagRules.findMany({
+        where: and(eq(tagRulesTable.userId, auth.userId), eq(tagRulesTable.enabled, true)),
       });
       if (tagRules.length > 0) {
         for (const zone of zones) {

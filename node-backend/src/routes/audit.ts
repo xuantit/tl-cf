@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
+import { and, count, desc, eq, like, type SQL } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { auditLogs } from "../db/schema.js";
 
 export const auditRouter = Router();
 
@@ -27,18 +29,18 @@ auditRouter.get("/", async (req, res) => {
   });
   const q = querySchema.parse(req.query);
 
-  const where = {
-    ...(q.userId ? { userId: q.userId } : {}),
-    ...(q.path ? { path: { contains: q.path } } : {}),
-  };
+  const conditions: SQL[] = [];
+  if (q.userId) conditions.push(eq(auditLogs.userId, q.userId));
+  if (q.path) conditions.push(like(auditLogs.path, `%${q.path}%`));
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const [total, logs] = await Promise.all([
-    prisma.auditLog.count({ where }),
-    prisma.auditLog.findMany({
+  const [[{ value: total }], logs] = await Promise.all([
+    db.select({ value: count() }).from(auditLogs).where(where),
+    db.query.auditLogs.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      skip: (q.page - 1) * q.limit,
-      take: q.limit,
+      orderBy: desc(auditLogs.createdAt),
+      offset: (q.page - 1) * q.limit,
+      limit: q.limit,
     }),
   ]);
 

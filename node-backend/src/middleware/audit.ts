@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { auditLogs } from "../db/schema.js";
 import logger from "../utils/logger.js";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -55,17 +56,15 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       req.auth?.email ??
       (fullPath.startsWith("/api/auth/") && typeof req.body?.email === "string" ? req.body.email : undefined);
 
-    prisma.auditLog
-      .create({
-        data: {
-          userId: req.auth?.userId,
-          email,
-          method: req.method,
-          path: fullPath,
-          status: res.statusCode,
-          metaJson,
-          ip: req.ip,
-        },
+    db.insert(auditLogs)
+      .values({
+        userId: req.auth?.userId,
+        email,
+        method: req.method,
+        path: fullPath,
+        status: res.statusCode,
+        metaJson,
+        ip: req.ip,
       })
       .catch((error: Error) => {
         logger.warn("Failed to write audit log", { error: error.message, path: req.path });
