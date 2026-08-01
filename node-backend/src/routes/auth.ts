@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
+
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 
 import { findUserByEmail, createUser } from "../models/userJson.js";
+import { requireAuth } from "../middleware/auth.js";
 import { prisma } from "../services/db.js";
 import { env } from "../utils/env.js";
 import logger from "../utils/logger.js";
@@ -121,22 +124,157 @@ authRouter.post("/login", async (req, res) => {
       return res.status(401).json({ detail: "Invalid credentials" });
     }
 
-    const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { isActive: true, role: true } });
+    const fresh = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { isActive: true, role: true, displayName: true },
+    });
     if (!fresh?.isActive) {
       logger.warn("Login attempt on locked account", { email: body.email, userId: user.id });
       return res.status(403).json({ detail: "Tài khoản đã bị khoá" });
     }
 
     const jwtSecret = env.JWT_SECRET || "default-jwt-secret-change-in-production";
-    const token = jwt.sign({ userId: user.id, email: user.email, role: fresh.role }, jwtSecret, {
+    const jti = randomUUID();
+    const token = jwt.sign({ userId: user.id, email: user.email, role: fresh.role, jti }, jwtSecret, {
       expiresIn: "7d",
     });
 
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+        jti,
+        userAgent: req.headers["user-agent"]?.slice(0, 200) ?? null,
+        ip: req.ip ?? null,
+      },
+    });
+
     logger.info("User logged in", { userId: user.id, email: user.email, role: fresh.role });
-    res.json({ token });
+    res.json({
+      token,
+      user: { userId: user.id, email: user.email, role: fresh.role, displayName: fresh.displayName },
+    });
   } catch (error) {
     logger.error("Login error", { error, email: req.body?.email });
     throw error;
   }
+});
+
+authRouter.get("/me", requireAuth, async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth!.userId },
+    select: { id: true, email: true, role: true, displayName: true, createdAt: true },
+  });
+  if (!user) return res.status(401).json({ detail: "Invalid token" });
+
+  res.json({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+    createdAt: user.createdAt,
+  });
+});
+
+authRouter.patch("/me", requireAuth, async (req, res) => {
+  const bodySchema = z.object({
+    displayName: z.string().trim().max(60, "Tên hiển thị tối đa 60 ký tự"),
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ detail: parsed.error.issues[0]?.message || "Invalid body" });
+  }
+
+  const displayName = parsed.data.displayName === "" ? null : parsed.data.displayName;
+  const user = await prisma.user.update({
+    where: { id: req.auth!.userId },
+    data: { displayName },
+    select: { id: true, email: true, role: true, displayName: true, createdAt: true },
+  });
+
+  logger.info("User profile updated", { userId: user.id });
+  res.json({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+    createdAt: user.createdAt,
+  });
+});
+
+authRouter.post("/change-password", requireAuth, async (req, res) => {
+  const bodySchema = z.object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(8, "Mật khẩu mới phải có ít nhất 8 ký tự"),
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ detail: parsed.error.issues[0]?.message || "Invalid body" });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth!.userId },
+    select: { id: true, passwordHash: true },
+  });
+  if (!user) return res.status(401).json({ detail: "Invalid token" });
+
+  const ok = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
+  if (!ok) {
+    logger.warn("Change password with wrong current password", { userId: user.id });
+    return res.status(400).json({ detail: "Mật khẩu hiện tại không đúng" });
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+  logger.info("User changed password", { userId: user.id });
+  res.json({ ok: true });
+});
+
+authRouter.get("/sessions", requireAuth, async (req, res) => {
+  const sessions = await prisma.session.findMany({
+    where: { userId: req.auth!.userId, revokedAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, jti: true, userAgent: true, ip: true, createdAt: true, lastSeenAt: true },
+  });
+
+  res.json(
+    sessions.map((s) => ({
+      id: s.id,
+      userAgent: s.userAgent,
+      ip: s.ip,
+      createdAt: s.createdAt,
+      lastSeenAt: s.lastSeenAt,
+      current: s.jti === req.auth!.jti,
+    })),
+  );
+});
+
+// Thu hồi mọi phiên khác (giữ phiên hiện tại) — đặt TRƯỚC /sessions/:id
+authRouter.delete("/sessions", requireAuth, async (req, res) => {
+  const result = await prisma.session.updateMany({
+    where: {
+      userId: req.auth!.userId,
+      revokedAt: null,
+      ...(req.auth!.jti ? { jti: { not: req.auth!.jti } } : {}),
+    },
+    data: { revokedAt: new Date() },
+  });
+
+  logger.info("User revoked all other sessions", { userId: req.auth!.userId, revoked: result.count });
+  res.json({ revoked: result.count });
+});
+
+authRouter.delete("/sessions/:id", requireAuth, async (req, res) => {
+  const sessionId = String(req.params.id);
+  const result = await prisma.session.updateMany({
+    where: { id: sessionId, userId: req.auth!.userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  if (result.count === 0) {
+    return res.status(404).json({ detail: "Không tìm thấy phiên đăng nhập" });
+  }
+
+  logger.info("User revoked session", { userId: req.auth!.userId, sessionId });
+  res.json({ ok: true });
 });
 

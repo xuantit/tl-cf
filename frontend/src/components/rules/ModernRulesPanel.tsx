@@ -314,7 +314,7 @@ export default function ModernRulesPanel({ zoneId }: { zoneId: string }) {
             <Input placeholder={t('Default for kind')} />
           </Form.Item>
           <Form.Item name='actionParametersJson' label={t('Action parameters (JSON)')}>
-            <Input.TextArea rows={5} placeholder='{ }' style={{ fontFamily: 'monospace' }} />
+            <Input.TextArea rows={5} placeholder='{ }' />
           </Form.Item>
           <Form.Item name='enabled' label={t('Enabled')} valuePropName='checked'>
             <Switch />

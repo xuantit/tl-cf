@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Card,
   Table,
-  Tag,
   Typography,
   Button,
   Space,
@@ -15,14 +13,15 @@ import {
   Tooltip,
   message,
 } from 'antd'
-import { PlusOutlined, CopyOutlined, DeleteOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import type { Dayjs } from 'dayjs'
 import { useTranslation } from 'react-i18next'
-import { api } from '../services/api'
+import { api, apiErrorDetail } from '../services/api'
+import PageHeader from '../components/PageHeader'
+import { Banner, EmptyState, Tag } from '../components/ui'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 interface InviteCode {
   id: string
@@ -33,6 +32,18 @@ interface InviteCode {
   usedBy: string[]
   expiresAt: string | null
   createdAt: string
+}
+
+/** Days until expiry (ceil); negative/0 = expired. */
+function daysLeft(iso: string): number {
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000)
+}
+
+function formatDay(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 export default function Invites() {
@@ -55,7 +66,7 @@ export default function Invites() {
     )
   }
 
-  const { data: invites = [], isLoading, refetch, isFetching } = useQuery<InviteCode[]>({
+  const { data: invites = [], isLoading, isError, error, refetch, isFetching } = useQuery<InviteCode[]>({
     queryKey: ['invites'],
     queryFn: async () => (await api.get('/invites')).data,
   })
@@ -113,101 +124,162 @@ export default function Invites() {
       title: t('Code'),
       dataIndex: 'code',
       render: (code: string) => (
-        <Space>
-          <Text strong style={{ fontFamily: 'monospace' }}>{code}</Text>
+        <span className="inline-flex items-center gap-1">
+          <span className="font-mono text-[12px] font-medium text-fg">{code}</span>
           <Tooltip title={t('Copy code')}>
-            <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => copy(code, t('invite code'))} />
+            <Button
+              type="text"
+              size="small"
+              aria-label={t('Copy code')}
+              onClick={(e) => {
+                e.stopPropagation()
+                copy(code, t('invite code'))
+              }}
+            >
+              ⧉
+            </Button>
           </Tooltip>
           <Tooltip title={t('Copy registration link')}>
-            <Button type="text" size="small" icon={<LinkOutlined />} onClick={() => copy(registerLink(code), t('registration link'))} />
+            <Button
+              type="text"
+              size="small"
+              aria-label={t('Copy registration link')}
+              onClick={(e) => {
+                e.stopPropagation()
+                copy(registerLink(code), t('registration link'))
+              }}
+            >
+              ↗
+            </Button>
           </Tooltip>
-        </Space>
+        </span>
       ),
     },
     {
       title: t('Note'),
       dataIndex: 'note',
       ellipsis: true,
-      render: (note: string | null) => note || <Text type="secondary">—</Text>,
+      responsive: ['md'],
+      render: (note: string | null) =>
+        note ? <span className="text-[12px] text-fg-2">{note}</span> : <span className="text-fg-3">—</span>,
     },
     {
       title: t('Used'),
       key: 'usage',
-      width: 120,
+      width: 90,
       render: (_, r) => {
         const exhausted = r.usedCount >= r.maxUses
-        const tag = <Tag color={exhausted ? 'default' : 'green'} variant="filled">{r.usedCount}/{r.maxUses}</Tag>
-        return r.usedBy.length > 0 ? (
-          <Tooltip title={r.usedBy.join(', ')}>{tag}</Tooltip>
-        ) : (
-          tag
+        const tag = (
+          <Tag variant={exhausted ? 'default' : 'ok'}>
+            {r.usedCount}/{r.maxUses}
+          </Tag>
         )
+        return r.usedBy.length > 0 ? <Tooltip title={r.usedBy.join(', ')}>{tag}</Tooltip> : tag
       },
     },
     {
       title: t('Expires'),
       dataIndex: 'expiresAt',
-      width: 170,
+      width: 130,
       render: (v: string | null) => {
-        if (!v) return <Text type="secondary">{t('No expiry')}</Text>
-        const expired = new Date(v) < new Date()
-        return <Tag color={expired ? 'red' : 'blue'} variant="filled">{new Date(v).toLocaleString(dateLocale)}</Tag>
+        if (!v) return <span className="font-mono text-[11px] text-fg-3">{t('No expiry')}</span>
+        const left = daysLeft(v)
+        if (left <= 0)
+          return <span className="font-mono text-[11px] text-danger">{t('expired')}</span>
+        return (
+          <span className="font-mono text-[11px] text-fg-2" title={new Date(v).toLocaleString(dateLocale)}>
+            {t('{{count}} days left', { count: left })}
+          </span>
+        )
       },
     },
     {
       title: t('Created at'),
       dataIndex: 'createdAt',
-      width: 170,
-      render: (v: string) => new Date(v).toLocaleString(dateLocale),
+      width: 110,
+      responsive: ['lg'],
+      render: (v: string) => <span className="font-mono text-[11px] text-fg-3">{formatDay(v)}</span>,
     },
     {
       title: '',
       key: 'actions',
       width: 60,
+      align: 'right',
       render: (_, r) => (
         <Popconfirm
           title={t('Revoke this invite code?')}
           description={t('Anyone who has not registered yet will no longer be able to use it.')}
           onConfirm={() => deleteMutation.mutate(r.id)}
           okText={t('Revoke')}
+          okButtonProps={{ danger: true }}
           cancelText={t('Cancel')}
         >
-          <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+          <Button type="text" danger size="small">
+            {t('revoke')}
+          </Button>
         </Popconfirm>
       ),
     },
   ]
 
+  const pendingCount = invites.filter(
+    (i) => i.usedCount < i.maxUses && (!i.expiresAt || daysLeft(i.expiresAt) > 0),
+  ).length
+
   return (
-    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
-            {t('Invite codes')}
-          </Title>
-          <Text type="secondary">
-            {t('Users need an invite code to register. Send the code or the registration link to the invitee.')}
-          </Text>
-        </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-            {t('Reload')}
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
-            {t('Create invite code')}
-          </Button>
-        </Space>
-      </div>
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={invites}
-          loading={isLoading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-          scroll={{ x: 'max-content' }}
-        />
-      </Card>
+    <div className="fade-in p-[clamp(12px,3vw,24px)]">
+      <PageHeader
+        title={t('Invite codes')}
+        crumb={t('{{count}} codes · {{pending}} pending', { count: invites.length, pending: pendingCount })}
+        actions={
+          <>
+            <Button onClick={() => refetch()} loading={isFetching}>
+              ↻ {t('Reload')}
+            </Button>
+            <Button type="primary" onClick={() => setAddOpen(true)}>
+              + {t('Create invite code')}
+            </Button>
+          </>
+        }
+      />
+      {isError && (
+        <Banner
+          tone="err"
+          className="mb-3"
+          actions={
+            <Button size="small" onClick={() => refetch()}>
+              ↻ {t('Retry')}
+            </Button>
+          }
+        >
+          {apiErrorDetail(error) || t('Could not load invite codes')}
+        </Banner>
+      )}
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={invites}
+        loading={isLoading}
+        rowClassName={(r) =>
+          r.usedCount >= r.maxUses || (r.expiresAt && daysLeft(r.expiresAt) <= 0) ? 'opacity-50' : ''
+        }
+        locale={{
+          emptyText: (
+            <EmptyState
+              icon="✉"
+              title={t('No invite codes')}
+              desc={t('Users need an invite code to register. Send the code or the registration link to the invitee.')}
+              actions={
+                <Button type="primary" size="small" onClick={() => setAddOpen(true)}>
+                  + {t('Create invite code')}
+                </Button>
+              }
+            />
+          ),
+        }}
+        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        scroll={{ x: 'max-content' }}
+      />
 
       <Modal
         title={t('Create invite code')}

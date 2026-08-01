@@ -58,6 +58,18 @@
 - ✅ **Zone → Zone → Edit**
 - ✅ **Account → Zone → Create** (có thể nằm trong Account Settings)
 
+### 6. **Analytics (trang Analytics / thống kê cache)**
+
+**Endpoint:** `POST /graphql` (Cloudflare GraphQL Analytics API — `httpRequests1hGroups` / `httpRequests1dGroups`)
+
+**Quyền yêu cầu:**
+- ✅ **Zone → Analytics → Read**
+
+**Lưu ý:**
+- Nếu token thiếu quyền này, backend trả về **403** với mã lỗi `ANALYTICS_PERMISSION_MISSING` và frontend hiển thị banner "thiếu quyền".
+- Global API Key luôn có đủ quyền; chỉ API Token scoped mới cần thêm quyền này.
+- Dữ liệu analytics được cache 60 giây phía backend để tránh rate limit.
+
 ## Checklist quyền đầy đủ
 
 Để tool hoạt động đầy đủ, API Token cần có:
@@ -70,6 +82,7 @@
 - ✅ Zone → Zone Settings → Edit (cho SSL mode, cache settings, Tiered Cache)
 - ✅ Zone → Cache Rules → Edit (cho Cache Rules)
 - ✅ Zone → DNS → Edit (cho DNS management)
+- ✅ Zone → Analytics → Read (cho trang Analytics)
 
 ### Account Rulesets (cho Cache Rules):
 - ✅ Account → Rulesets → Edit

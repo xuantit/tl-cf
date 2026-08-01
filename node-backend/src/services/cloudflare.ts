@@ -96,6 +96,18 @@ export interface PageRule {
   actions: Array<{ id: string; value?: unknown }>;
 }
 
+export type AccessRuleMode = "block" | "challenge" | "whitelist" | "js_challenge" | "managed_challenge";
+export type AccessRuleTarget = "ip" | "ip_range" | "country" | "asn";
+
+export interface AccessRule {
+  id: string;
+  mode: AccessRuleMode;
+  configuration: { target: AccessRuleTarget; value: string };
+  notes?: string;
+  created_on?: string;
+  modified_on?: string;
+}
+
 export type RuleKind = "redirect" | "cache" | "configuration";
 
 export interface RulesetRule {
@@ -305,6 +317,7 @@ class CloudflareService {
       name: zone.name,
       status: zone.status,
       plan: zone.plan?.legacy_id || zone.plan?.name?.toLowerCase().replace(/\s+website$/, "") || undefined,
+      nameServers: zone.name_servers || [],
       ssl: {
         status: zone.ssl?.status || "unknown",
         certificate_authority: zone.ssl?.certificate_authority,
@@ -400,6 +413,7 @@ class CloudflareService {
       name: zone.name,
       status: zone.status,
       plan: zone.plan?.legacy_id || zone.plan?.name?.toLowerCase().replace(/\s+website$/, "") || undefined,
+      nameServers: zone.name_servers || [],
       ssl: {
         status: zone.ssl?.status || "unknown",
         certificate_authority: zone.ssl?.certificate_authority,
@@ -1036,6 +1050,146 @@ class CloudflareService {
       return response.data.success === true;
     } catch (error: any) {
       throw this.toCloudflareError(error, "Failed to verify Cloudflare credentials");
+    }
+  }
+
+  /**
+   * Query the Cloudflare GraphQL Analytics API (POST /client/v4/graphql).
+   * GraphQL errors arrive in the body ({ data, errors }) even with HTTP 200;
+   * a non-empty errors array is converted into a CloudflareError. Permission
+   * errors ("not authorized" / code authz) get status 403 so routes can map them.
+   */
+  async queryGraphql<T>(
+    credentials: CloudflareCredentials,
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<T> {
+    const client = this.createClient(credentials);
+
+    let attempt = 0;
+    for (;;) {
+      let response;
+      try {
+        response = await client.post("/graphql", { query, variables });
+      } catch (error) {
+        // The axios interceptor only retries GETs; GraphQL is a read-only POST,
+        // so apply the same 429/5xx retry policy here.
+        const axiosError = error as AxiosError<any>;
+        const status = axiosError.response?.status;
+        const retryableStatus = status === 429 || (status !== undefined && status >= 500);
+        if (retryableStatus && attempt < this.maxRetryAttempts) {
+          await this.sleep(this.getRetryDelayMs(axiosError, attempt));
+          attempt += 1;
+          continue;
+        }
+        throw this.toCloudflareError(error, "Failed to query Cloudflare GraphQL API");
+      }
+
+      const body = response.data as {
+        data?: T;
+        errors?: Array<{ message?: string; extensions?: { code?: string } }>;
+      };
+
+      const gqlErrors = (body?.errors ?? []).filter((item) => item && typeof item.message === "string");
+      if (gqlErrors.length > 0) {
+        const messages = gqlErrors.map((item) => item.message as string);
+        const isPermissionError = gqlErrors.some((item) => {
+          const message = (item.message ?? "").toLowerCase();
+          const code = (item.extensions?.code ?? "").toLowerCase();
+          return message.includes("not authorized") || message.includes("unauthorized") || code === "authz";
+        });
+        throw new CloudflareError({
+          message: messages[0],
+          status: isPermissionError ? 403 : 400,
+          retryable: false,
+          cfErrors: messages.map((message) => ({ message })),
+        });
+      }
+
+      if (body?.data === undefined || body?.data === null) {
+        throw new CloudflareError({
+          message: "Cloudflare GraphQL API returned an empty response",
+          retryable: false,
+        });
+      }
+
+      return body.data;
+    }
+  }
+
+  // ---- IP Access Rules (zone-level firewall access rules) ----
+
+  private mapAccessRule(raw: any): AccessRule {
+    return {
+      id: raw.id,
+      mode: raw.mode,
+      configuration: {
+        target: raw.configuration?.target,
+        value: raw.configuration?.value,
+      },
+      notes: raw.notes ?? undefined,
+      created_on: raw.created_on,
+      modified_on: raw.modified_on,
+    };
+  }
+
+  async listAccessRules(credentials: CloudflareCredentials, zoneId: string): Promise<AccessRule[]> {
+    const client = this.createClient(credentials);
+    const rules = await this.fetchAllPages(client, `/zones/${zoneId}/firewall/access_rules/rules`, 100);
+    return rules.map((rule: any) => this.mapAccessRule(rule));
+  }
+
+  async createAccessRule(
+    credentials: CloudflareCredentials,
+    zoneId: string,
+    rule: { mode: AccessRuleMode; configuration: { target: AccessRuleTarget; value: string }; notes?: string },
+  ): Promise<AccessRule> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(`/zones/${zoneId}/firewall/access_rules/rules`, {
+        mode: rule.mode,
+        configuration: rule.configuration,
+        notes: rule.notes,
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to create access rule");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to create access rule");
+    }
+    return this.mapAccessRule(response.data.result);
+  }
+
+  async updateAccessRule(
+    credentials: CloudflareCredentials,
+    zoneId: string,
+    ruleId: string,
+    updates: { mode?: AccessRuleMode; notes?: string },
+  ): Promise<AccessRule> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.patch(`/zones/${zoneId}/firewall/access_rules/rules/${ruleId}`, updates);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to update access rule");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to update access rule");
+    }
+    return this.mapAccessRule(response.data.result);
+  }
+
+  async deleteAccessRule(credentials: CloudflareCredentials, zoneId: string, ruleId: string): Promise<void> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/zones/${zoneId}/firewall/access_rules/rules/${ruleId}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete access rule");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete access rule");
     }
   }
 }

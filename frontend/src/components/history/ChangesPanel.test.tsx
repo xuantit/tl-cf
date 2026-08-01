@@ -47,7 +47,7 @@ describe('ChangesPanel', () => {
   })
 
   it('renders change rows', async () => {
-    ;(api.get as any).mockResolvedValue({ data: [sampleChange] })
+    vi.mocked(api.get).mockResolvedValue({ data: [sampleChange] })
 
     renderPanel(['/history?tab=changes'])
 
@@ -55,7 +55,7 @@ describe('ChangesPanel', () => {
   })
 
   it('shows zone filter tag and passes zoneId to the query', async () => {
-    ;(api.get as any).mockResolvedValue({ data: [sampleChange] })
+    vi.mocked(api.get).mockResolvedValue({ data: [sampleChange] })
 
     renderPanel(['/history?tab=changes&zone=z1'])
 

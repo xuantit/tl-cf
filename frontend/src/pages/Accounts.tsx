@@ -1,14 +1,13 @@
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Table, Button, Form, Input, Modal, message, Segmented, Tag, Space, Popconfirm, Typography, Alert } from 'antd'
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined, CloudServerOutlined } from '@ant-design/icons'
+import { Table, Button, Form, Input, Modal, message, Segmented, Alert, Typography, Dropdown } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { useAccountStore } from '../stores/useAccountStore'
-
-const { Text } = Typography
 import PageHeader from '../components/PageHeader'
+import { Dot, EmptyState, KvRow, SectionHeader, SkeletonLine, Tag } from '../components/ui'
 
 interface Account {
   id: string
@@ -21,6 +20,102 @@ interface Account {
   domainsCount: number
 }
 
+type FeatureState = 'available' | 'forbidden' | 'plan_limited' | 'unavailable' | 'unknown'
+
+interface Capabilities {
+  token: { valid: boolean; authType: string; accountId: string | null }
+  zone: { id: string; plan: string | null } | null
+  features: Record<string, { state: FeatureState; requiredPermission: string; reason: string | null }>
+}
+
+interface ZoneLite {
+  id: string
+  name: string
+}
+
+function FeatureTag({ state }: { state: FeatureState }) {
+  const { t } = useTranslation()
+  if (state === 'available') return <Tag variant="ok">{t('granted')}</Tag>
+  if (state === 'forbidden') return <Tag variant="err">{t('missing')}</Tag>
+  return <Tag>{t(state)}</Tag>
+}
+
+/** Token permissions of the active account, probed via GET /cf/capabilities (read-only). */
+function CapabilitiesSection({ accountId }: { accountId: string }) {
+  const { t } = useTranslation()
+
+  // Reuse the ['domains'] cache — probes need a zoneId to run against.
+  const { data: zones = [] } = useQuery<ZoneLite[]>({
+    queryKey: ['domains'],
+    queryFn: async () => (await api.get('/domains')).data,
+    staleTime: 60_000,
+  })
+  const zoneId = zones[0]?.id
+
+  const { data: caps, isLoading, isError, refetch, isFetching } = useQuery<Capabilities>({
+    queryKey: ['cf-capabilities', accountId, zoneId],
+    queryFn: async () =>
+      (await api.get('/cf/capabilities', { params: { accountId, ...(zoneId ? { zoneId } : {}) } })).data,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+
+  const entries = caps ? Object.entries(caps.features) : []
+  const half = Math.ceil(entries.length / 2)
+
+  return (
+    <>
+      <SectionHeader
+        title={
+          zoneId
+            ? t('Token permissions · probed on {{zone}}', { zone: zones[0].name })
+            : t('Token permissions')
+        }
+        actions={
+          <Button size="small" type="text" loading={isFetching} onClick={() => refetch()}>
+            ↻ {t('Re-check')}
+          </Button>
+        }
+        className="mt-4"
+      />
+      {isLoading ? (
+        <div className="flex flex-col gap-3 p-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonLine key={i} width={`${70 - i * 12}%`} />
+          ))}
+        </div>
+      ) : isError || !caps ? (
+        <div className="px-4 py-3 font-mono text-[11px] text-fg-3">
+          {t('Could not evaluate token permissions')}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-2">
+          {[entries.slice(0, half), entries.slice(half)].map((group, gi) => (
+            <div key={gi} className={`p-[13px_16px] ${gi === 1 ? 'md:border-l md:border-solid md:border-l-stroke' : ''}`}>
+              {group.map(([name, f]) => (
+                <KvRow
+                  key={name}
+                  k={<span className="font-mono text-[12.5px]">#{f.requiredPermission}</span>}
+                  v={
+                    <span title={f.reason || undefined}>
+                      <FeatureTag state={f.state} />
+                    </span>
+                  }
+                />
+              ))}
+            </div>
+          ))}
+          {!zoneId && (
+            <div className="col-span-full px-4 pb-3 font-mono text-[11.5px] text-fg-3">
+              {t('Add a domain to this account to probe real permissions.')}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function Accounts() {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -29,6 +124,8 @@ export default function Accounts() {
   const qc = useQueryClient()
   const activeAccountId = useAccountStore((s) => s.activeAccountId)
   const setActiveAccountId = useAccountStore((s) => s.setActiveAccountId)
+  // Per-session connection test results (id → result + timestamp)
+  const [lastTest, setLastTest] = useState<Record<string, { valid: boolean; at: number }>>({})
 
   // Modal state lives in the URL so F5 restores the view
   const addOpen = searchParams.get('modal') === 'add'
@@ -95,72 +192,165 @@ export default function Accounts() {
       message.error(e?.response?.data?.detail || t('Failed')),
   })
 
+  const testConnection = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.get('/cf/test', { params: { accountId: id } })).data as { valid: boolean },
+    onSuccess: (data, id) => {
+      setLastTest((prev) => ({ ...prev, [id]: { valid: data.valid, at: Date.now() } }))
+      if (data.valid) message.success(t('Connection OK'))
+      else message.error(t('Connection failed'))
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }, id) => {
+      setLastTest((prev) => ({ ...prev, [id]: { valid: false, at: Date.now() } }))
+      message.error(e?.response?.data?.detail || t('Connection failed'))
+    },
+  })
+
+  const confirmDelete = (acc: Account) => {
+    Modal.confirm({
+      title: t('Delete this account?'),
+      content: t('Locally saved settings of its domains are removed too.'),
+      okText: t('Delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('Cancel'),
+      onOk: () => remove.mutate(acc.id),
+    })
+  }
+
   const columns: ColumnsType<Account> = [
     {
-      title: t('Account'),
+      title: t('Label'),
       dataIndex: 'label',
       render: (label: string, r) => (
-        <Space>
-          <CloudServerOutlined />
-          <span style={{ fontWeight: 500 }}>{label || r.email || r.id.slice(0, 8)}</span>
-          {r.id === activeAccountId && <Tag color="orange" variant="filled">{t('Selected')}</Tag>}
-        </Space>
+        <span className="inline-flex items-center gap-[6px]">
+          <Dot status={r.id === activeAccountId ? 'ok' : r.isActive ? 'off' : 'warn'} />
+          <span className="font-mono text-[12px] font-medium text-fg">
+            {label || r.email || r.id.slice(0, 8)}
+          </span>
+        </span>
       ),
     },
     {
-      title: t('Auth type'),
+      title: t('Type'),
       dataIndex: 'authType',
-      render: (v: string) => (
-        <Tag color={v === 'apiToken' ? 'orange' : 'default'} variant="filled">
-          {v === 'apiToken' ? 'API Token' : 'Global API Key'}
-        </Tag>
+      width: 110,
+      render: (v: string) =>
+        v === 'apiToken' ? <Tag variant="info">api token</Tag> : <Tag variant="warn">global key</Tag>,
+    },
+    {
+      title: 'Email / Token',
+      dataIndex: 'email',
+      width: 190,
+      responsive: ['md'],
+      render: (v: string | undefined, r) => (
+        <span className="font-mono text-[12px] text-fg-2">
+          {r.authType === 'apiToken' ? '••••••••••••' : v || '—'}
+        </span>
       ),
     },
-    { title: 'Email', dataIndex: 'email', render: (v?: string) => v || <Text type="secondary">—</Text> },
-    { title: 'Domains', dataIndex: 'domainsCount', width: 100 },
+    {
+      title: 'Zones',
+      dataIndex: 'domainsCount',
+      width: 80,
+      render: (v: number) => (
+        <span className={`font-mono text-[12.5px] ${v === 0 ? 'text-fg-3' : 'text-fg-2'}`}>{v}</span>
+      ),
+    },
     {
       title: t('Status'),
-      dataIndex: 'isActive',
-      render: (v: boolean) =>
-        v ? <Tag color="success" variant="filled">{t('Active')}</Tag> : <Tag color="default" variant="filled">{t('Inactive')}</Tag>,
+      key: 'status',
+      width: 120,
+      render: (_v, r) => {
+        if (r.id === activeAccountId) return <Tag variant="ok">{t('in use')}</Tag>
+        if (r.isActive) return <Tag>{t('ready')}</Tag>
+        return <Tag variant="warn">{t('disabled')}</Tag>
+      },
     },
     {
-      title: t('Actions'),
+      title: t('Checked'),
+      key: 'checked',
+      width: 110,
+      responsive: ['md'],
+      render: (_v, r) => {
+        const res = lastTest[r.id]
+        if (!res) return <span className="text-fg-3">—</span>
+        return (
+          <span className="inline-flex items-center gap-[6px] font-mono text-[12px] text-fg-2">
+            <Dot status={res.valid ? 'ok' : 'err'} />
+            {new Date(res.at).toLocaleTimeString()}
+          </span>
+        )
+      },
+    },
+    {
+      title: '',
       key: 'actions',
+      width: 44,
+      align: 'right',
       render: (_v, r) => (
-        <Space>
-          <Button size="small" onClick={() => setActiveAccountId(r.id)} disabled={r.id === activeAccountId}>
-            {t('Select')}
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'select', label: t('Select'), disabled: r.id === activeAccountId },
+              { key: 'test', label: t('Test connection') },
+              { key: 'toggle', label: r.isActive ? t('Disable') : t('Enable') },
+              { type: 'divider' },
+              { key: 'delete', label: t('Delete'), danger: true },
+            ],
+            onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation()
+              if (key === 'select') setActiveAccountId(r.id)
+              if (key === 'test') testConnection.mutate(r.id)
+              if (key === 'toggle') toggleActive.mutate(r)
+              if (key === 'delete') confirmDelete(r)
+            },
+          }}
+        >
+          <Button size="small" type="text" aria-label={t('Account actions')}>
+            ⋯
           </Button>
-          <Button
-            size="small"
-            icon={r.isActive ? <StopOutlined /> : <CheckCircleOutlined />}
-            onClick={() => toggleActive.mutate(r)}
-          >
-            {r.isActive ? t('Disable') : t('Enable')}
-          </Button>
-          <Popconfirm title={t('Delete this account?')} onConfirm={() => remove.mutate(r.id)} okText={t('Delete')} cancelText={t('Cancel')}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
+        </Dropdown>
       ),
     },
   ]
 
   return (
-    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
+    <div className="fade-in p-[clamp(12px,3vw,24px)]">
       <PageHeader
-        title="Cloudflare Accounts"
-        description={t('Manage multiple CF accounts and switch between them')}
+        title={t('Cloudflare accounts')}
+        crumb={t('{{count}} connections', { count: list.length })}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
-            {t('Add account')}
+          <Button type="primary" onClick={() => setAddOpen(true)}>
+            + {t('Add account')}
           </Button>
         }
       />
-      <Card>
-        <Table loading={isLoading} dataSource={list} rowKey="id" columns={columns} scroll={{ x: 'max-content' }} />
-      </Card>
+      <Table
+        loading={isLoading}
+        dataSource={list}
+        rowKey="id"
+        columns={columns}
+        rowClassName={(r) => (r.id === activeAccountId ? 'bg-bg-sel' : '')}
+        locale={{
+          emptyText: (
+            <EmptyState
+              icon="⌂"
+              title={t('No Cloudflare account yet')}
+              desc={t('Connect an API Token to start managing domains')}
+              actions={
+                <Button type="primary" size="small" onClick={() => setAddOpen(true)}>
+                  + {t('Add account')}
+                </Button>
+              }
+            />
+          ),
+        }}
+        pagination={false}
+        scroll={{ x: 'max-content' }}
+      />
+
+      {activeAccountId && <CapabilitiesSection accountId={activeAccountId} />}
 
       <Modal
         title={t('Add Cloudflare account')}

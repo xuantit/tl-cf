@@ -7,6 +7,8 @@ import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import { configService } from "../services/configService.js";
 import { createChangeSet, type ChangeItemPayload } from "../services/changes.js";
+import { prisma } from "../services/db.js";
+import { matchTagRules } from "../services/tags.js";
 import { sendApiError } from "../utils/apiError.js";
 import { isCloudflareError } from "../services/cloudflare.js";
 import logger from "../utils/logger.js";
@@ -124,6 +126,25 @@ domainsRouter.get("/", async (req, res) => {
       } catch (error: any) {
         logger.warn("Failed to sync zones to config", { error: error.message });
       }
+    }
+
+    // Auto-tag on read: merge enabled TagRule matches into each zone's tags.
+    // Never persisted — rules are re-evaluated on every request.
+    try {
+      const tagRules = await prisma.tagRule.findMany({
+        where: { userId: auth.userId, enabled: true },
+      });
+      if (tagRules.length > 0) {
+        for (const zone of zones) {
+          const matched = matchTagRules(tagRules, zone);
+          if (matched.length > 0) {
+            const saved: string[] = (zone as any).tags ?? [];
+            (zone as any).tags = [...new Set([...saved, ...matched])];
+          }
+        }
+      }
+    } catch (error: any) {
+      logger.warn("Failed to apply auto-tag rules", { error: error.message });
     }
 
     // Fetch live SSL mode for zones that still lack it (saved settings only exist after the
@@ -917,6 +938,161 @@ domainsRouter.patch("/:zoneId/security", async (req, res) => {
       status: 400,
       code: "SECURITY_SETTINGS_UPDATE_FAILED",
       detail: "Failed to update security settings",
+    });
+  }
+});
+
+// IP Access Rules (zone-level firewall access rules)
+const accessRuleModeSchema = z.enum(["block", "challenge", "whitelist", "js_challenge", "managed_challenge"]);
+const accessRuleTargetSchema = z.enum(["ip", "ip_range", "country", "asn"]);
+
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+// Light IPv6 check: hex groups separated by ":", allowing "::" compression.
+const IPV6_RE = /^(([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,7}:|([0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,5}(:[0-9a-f]{1,4}){1,2}|([0-9a-f]{1,4}:){1,4}(:[0-9a-f]{1,4}){1,3}|([0-9a-f]{1,4}:){1,3}(:[0-9a-f]{1,4}){1,4}|([0-9a-f]{1,4}:){1,2}(:[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:((:[0-9a-f]{1,4}){1,6})|:((:[0-9a-f]{1,4}){1,7}|:))$/i;
+
+/** Validate and normalize the rule value for its target. Returns null when invalid. */
+function normalizeAccessRuleValue(target: "ip" | "ip_range" | "country" | "asn", value: string): string | null {
+  const trimmed = value.trim();
+  switch (target) {
+    case "ip":
+      return IPV4_RE.test(trimmed) || IPV6_RE.test(trimmed) ? trimmed : null;
+    case "country":
+      return /^[a-z]{2}$/i.test(trimmed) ? trimmed.toUpperCase() : null;
+    case "asn":
+      return /^AS\d+$/i.test(trimmed) ? trimmed.toUpperCase() : null;
+    case "ip_range":
+      return trimmed.length > 0 ? trimmed : null;
+  }
+}
+
+domainsRouter.get("/:zoneId/access-rules", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  try {
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const rules = await cloudflareService.listAccessRules(credentials, zoneId);
+    res.json({ rules });
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 500,
+      code: "ACCESS_RULES_LIST_FAILED",
+      detail: "Failed to fetch access rules",
+    });
+  }
+});
+
+domainsRouter.post("/:zoneId/access-rules", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  const bodySchema = z.object({
+    mode: accessRuleModeSchema,
+    target: accessRuleTargetSchema,
+    value: z.string().min(1).max(100),
+    notes: z.string().max(200).optional(),
+  });
+  try {
+    const body = bodySchema.parse(req.body);
+    const value = normalizeAccessRuleValue(body.target, body.value);
+    if (value === null) {
+      return sendApiError(res, new Error(`Invalid value "${body.value}" for target "${body.target}"`), {
+        status: 400,
+        code: "ACCESS_RULE_INVALID_VALUE",
+        detail: "Invalid access rule value",
+      });
+    }
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const rule = await cloudflareService.createAccessRule(credentials, zoneId, {
+      mode: body.mode,
+      configuration: { target: body.target, value },
+      notes: body.notes,
+    });
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "access_rule.create",
+      reversible: false,
+      items: [
+        {
+          resourceType: "access_rule",
+          resourceId: rule.id,
+          before: undefined,
+          after: rule,
+        },
+      ],
+    });
+
+    res.status(201).json(rule);
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "ACCESS_RULE_CREATE_FAILED",
+      detail: "Failed to create access rule",
+    });
+  }
+});
+
+domainsRouter.patch("/:zoneId/access-rules/:ruleId", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId, ruleId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  const bodySchema = z
+    .object({
+      mode: accessRuleModeSchema.optional(),
+      notes: z.string().max(200).optional(),
+    })
+    .refine((v) => Object.keys(v).length > 0, { message: "No updates provided" });
+  try {
+    const body = bodySchema.parse(req.body);
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const rule = await cloudflareService.updateAccessRule(credentials, zoneId, ruleId, body);
+    res.json(rule);
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "ACCESS_RULE_UPDATE_FAILED",
+      detail: "Failed to update access rule",
+    });
+  }
+});
+
+domainsRouter.delete("/:zoneId/access-rules/:ruleId", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const { zoneId, ruleId } = req.params;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  try {
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    await cloudflareService.deleteAccessRule(credentials, zoneId, ruleId);
+
+    await recordChangeSet({
+      ownerId: auth.userId,
+      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
+      zoneId,
+      action: "access_rule.delete",
+      reversible: false,
+      items: [
+        {
+          resourceType: "access_rule",
+          resourceId: ruleId,
+          before: undefined,
+          after: undefined,
+        },
+      ],
+    });
+
+    res.status(204).send();
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "ACCESS_RULE_DELETE_FAILED",
+      detail: "Failed to delete access rule",
     });
   }
 });

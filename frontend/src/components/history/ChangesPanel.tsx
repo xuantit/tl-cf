@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { EyeOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
-import { Button, Card, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
+import { RollbackOutlined } from '@ant-design/icons'
+import { Button, Modal, Popconfirm, Table, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../services/api'
+import { EmptyState, SkeletonLine, Tag } from '../ui'
+import type { TagVariant } from '../ui'
+import { CodeChunk, DayHeader, TimelineRow } from './Timeline'
+import { groupByDay } from '../../utils/timeline'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
 interface ChangeItem {
   id: string
@@ -49,13 +53,13 @@ interface RollbackPreview {
   operations: RollbackOperation[]
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  done: 'success',
-  pending: 'processing',
-  failed: 'error',
-  rollback_requested: 'warning',
+const STATUS_VARIANT: Record<string, TagVariant> = {
+  done: 'ok',
+  pending: 'info',
+  failed: 'err',
+  rollback_requested: 'warn',
   rolled_back: 'default',
-  rollback_failed: 'error',
+  rollback_failed: 'err',
 }
 
 export default function ChangesPanel() {
@@ -121,55 +125,6 @@ export default function ChangesPanel() {
       message.error(e?.response?.data?.detail || t('Failed to rollback')),
   })
 
-  const columns: ColumnsType<ChangeSet> = [
-    {
-      title: t('Action'),
-      dataIndex: 'action',
-      render: (value: string) => <code>{value}</code>,
-    },
-    {
-      title: t('Zone'),
-      dataIndex: 'zoneId',
-      render: (value: string | null) => value || <Text type='secondary'>—</Text>,
-    },
-    {
-      title: t('Status'),
-      dataIndex: 'status',
-      width: 160,
-      render: (status: string) => (
-        <Tag color={STATUS_COLOR[status] || 'default'} variant="filled">
-          {t(status)}
-        </Tag>
-      ),
-    },
-    {
-      title: t('Reversible'),
-      dataIndex: 'reversible',
-      width: 120,
-      render: (value: boolean) => (
-        <Tag color={value ? 'success' : 'default'} variant="filled">
-          {value ? t('Yes') : t('No')}
-        </Tag>
-      ),
-    },
-    {
-      title: t('Created'),
-      dataIndex: 'createdAt',
-      width: 180,
-      render: (v: string) => new Date(v).toLocaleString(dateLocale),
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 120,
-      render: (_v, record) => (
-        <Button size='small' icon={<EyeOutlined />} onClick={() => setChangeParam(record.id)}>
-          {t('Details')}
-        </Button>
-      ),
-    },
-  ]
-
   const itemColumns: ColumnsType<ChangeItem> = [
     { title: t('Resource'), dataIndex: 'resourceType', width: 150 },
     { title: 'ID', dataIndex: 'resourceId', width: 160, render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code> },
@@ -189,21 +144,75 @@ export default function ChangesPanel() {
     },
   ]
 
+  const groups = groupByDay(changes, (change) => change.createdAt)
+
   return (
     <>
-      <Card>
-        <Space style={{ marginBottom: 16 }} wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-            {t('Refresh')}
-          </Button>
-          {zoneFilter && (
-            <Tag closable onClose={clearZoneFilter} color="blue">
-              {t('Zone')}: {zoneFilter}
-            </Tag>
-          )}
-        </Space>
-        <Table loading={isLoading} dataSource={changes} rowKey='id' columns={columns} scroll={{ x: 'max-content' }} />
-      </Card>
+      <div className="flex items-center justify-end gap-2 pb-2">
+        {zoneFilter && (
+          <Tag variant="info">
+            {t('Zone')}: {zoneFilter}
+            <span
+              className="ml-1 cursor-pointer"
+              role="button"
+              aria-label={t('Clear zone filter')}
+              onClick={clearZoneFilter}
+            >
+              ✕
+            </span>
+          </Tag>
+        )}
+        <Button size="small" type="text" onClick={() => refetch()} loading={isFetching}>
+          ↻ {t('Refresh')}
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex flex-col gap-[14px] p-4" data-testid="changes-skeleton">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonLine key={i} width={`${88 - (i % 3) * 12}%`} />
+          ))}
+        </div>
+      ) : changes.length === 0 ? (
+        <EmptyState icon="◷" title={t('No changes yet')} desc={t('DNS and settings changes will appear here')} />
+      ) : (
+        groups.map((group) => (
+          <div key={group.date}>
+            <DayHeader group={group} />
+            {group.items.map((change) => (
+              <TimelineRow
+                key={change.id}
+                time={change.createdAt}
+                title={
+                  <>
+                    <CodeChunk>{change.action}</CodeChunk>
+                    {change.zoneId ? <span className="ml-2 font-mono text-[11px] text-fg-3">{change.zoneId}</span> : null}
+                  </>
+                }
+                meta={new Date(change.createdAt).toLocaleString(dateLocale)}
+                right={
+                  <>
+                    <Tag variant={STATUS_VARIANT[change.status] || 'default'}>{t(change.status)}</Tag>
+                    {change.reversible && (
+                      <Button
+                        size="small"
+                        type="text"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setChangeParam(change.id)
+                        }}
+                      >
+                        ↺ {t('rollback')}
+                      </Button>
+                    )}
+                  </>
+                }
+                onClick={() => setChangeParam(change.id)}
+              />
+            ))}
+          </div>
+        ))
+      )}
 
       <Modal
         open={!!selectedId}
@@ -231,28 +240,31 @@ export default function ChangesPanel() {
         ]}
       >
         {selected && (
-          <Space orientation='vertical' size='middle' style={{ width: '100%' }}>
-            <Space wrap>
-              <Tag color={STATUS_COLOR[selected.status] || 'default'} variant="filled">{t(selected.status)}</Tag>
-              <Tag color={selected.reversible ? 'success' : 'default'} variant="filled">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Tag variant={STATUS_VARIANT[selected.status] || 'default'}>{t(selected.status)}</Tag>
+              <Tag variant={selected.reversible ? 'ok' : 'default'}>
                 {selected.reversible ? t('Reversible') : t('Not reversible')}
               </Tag>
               {selected.zoneId ? <Text type='secondary'>zone: {selected.zoneId}</Text> : null}
-            </Space>
+            </div>
 
             {selected.reversible && preview && (
-              <Card size='small' title={t('Rollback preview')}>
-                <Paragraph type='secondary' style={{ marginBottom: 8 }}>
-                  {t('{{count}} operation(s) will be applied', { count: preview.itemCount })}
-                </Paragraph>
-                <Space orientation='vertical' size={4} style={{ width: '100%' }}>
+              <div className="rounded-md border border-solid border-stroke">
+                <div className="border-0 border-b border-solid border-stroke bg-bg-side px-3 py-2 font-mono text-[11px] uppercase tracking-[.08em] text-fg-3">
+                  {t('Rollback preview')} · {t('{{count}} operation(s) will be applied', { count: preview.itemCount })}
+                </div>
+                <div className="flex flex-col">
                   {preview.operations.map((op, index) => (
-                    <Text key={index} style={{ fontSize: 12 }}>
-                      • {op.action} — <code>{op.resourceType}</code> {op.resourceId}
-                    </Text>
+                    <div
+                      key={index}
+                      className="border-0 border-b border-solid border-stroke-2 px-3 py-[6px] font-mono text-[11px] text-fg-2 last:border-b-0"
+                    >
+                      {op.action} — <CodeChunk>{op.resourceType}</CodeChunk> {op.resourceId}
+                    </div>
                   ))}
-                </Space>
-              </Card>
+                </div>
+              </div>
             )}
 
             <Table
@@ -263,7 +275,7 @@ export default function ChangesPanel() {
               pagination={false}
               scroll={{ x: 'max-content' }}
             />
-          </Space>
+          </div>
         )}
       </Modal>
     </>

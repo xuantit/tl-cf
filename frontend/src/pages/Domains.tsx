@@ -1,48 +1,70 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Tag, Button, message, Input, Space, Typography, Modal, Form, Popconfirm, theme, Select } from 'antd'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, SwapOutlined, AppstoreAddOutlined, TagsOutlined } from '@ant-design/icons'
-import { api } from '../services/api'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button, Form, Input, Modal, Popconfirm, Select, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
-import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { api, apiErrorDetail } from '../services/api'
+import { useDomains } from '../hooks/useDomains'
+import { useDomainSelection } from '../hooks/useDomainSelection'
+import { useDomainFilters, type DomainTab } from '../hooks/useDomainFilters'
+import { useAccountStore } from '../stores/useAccountStore'
+import { useSelectionMode } from '../stores/useSelectionMode'
+import type { Zone } from '../types/domain'
+import type { CfAccount } from '../components/AccountSwitcher'
+import PageHeader from '../components/PageHeader'
+import BulkActionBar, { BulkActionButton } from '../components/BulkActionBar'
+import ConfirmDestructive from '../components/ConfirmDestructive'
 import BulkProgressModal from '../components/BulkProgressModal'
 import BulkAddDomainsModal, { CreateZonesDone } from '../components/domains/BulkAddDomainsModal'
 import BulkDnsReplaceModal from '../components/domains/BulkDnsReplaceModal'
-import PageHeader from '../components/PageHeader'
+import { Dot, EmptyState, Banner, SkeletonLine, Tag } from '../components/ui'
+import type { DotStatus } from '../components/ui'
 
-const { Text } = Typography
+const STATUS_DOT: Record<string, DotStatus> = {
+  active: 'ok',
+  pending: 'warn',
+  error: 'err',
+}
 
-interface Zone {
-  id: string
-  name: string
-  status: string
-  plan?: string
-  ssl?: {
-    status: string
-    certificate_authority?: string
-    mode?: string
+function SslCell({ zone }: { zone: Zone }) {
+  const mode = zone.sslMode || zone.ssl?.mode
+  if (mode) {
+    return (
+      <span className="inline-flex items-center gap-[6px]">
+        <Dot status={mode !== 'off' ? 'ok' : 'off'} />
+        <span className="font-mono text-[12px] text-fg-2">{mode}</span>
+      </span>
+    )
   }
-  sslMode?: string
-  tags?: string[]
+  const status = zone.ssl?.status
+  if (status && status !== 'unknown') {
+    return (
+      <span className="inline-flex items-center gap-[6px]">
+        <Dot status={status === 'active' ? 'ok' : 'warn'} />
+        <span className="font-mono text-[12px] text-fg-2">{status}</span>
+      </span>
+    )
+  }
+  return <span className="text-fg-3">—</span>
 }
 
 export default function Domains() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { token } = theme.useToken()
   const [searchParams, setSearchParams] = useSearchParams()
-  // Sidebar "Find" hands off its query via ?q=
-  const [searchText, setSearchText] = useState(searchParams.get('q') || '')
-  const [tagFilter, setTagFilter] = useState<string[]>([])
   const [form] = Form.useForm()
 
-  // Modal & job state live in the URL so F5 / shared links restore the view
-  const activeModal = searchParams.get('modal') // 'add' | 'bulk-add' | 'bulk-dns'
+  // Modal, job, search, tab and selection state live in the URL so F5 / shared links restore the view
+  const activeModal = searchParams.get('modal') // 'add' | 'bulk-add' | 'bulk-dns' | 'tags' | 'delete'
   const jobId = searchParams.get('job')
-  const selectedRowKeys = searchParams.getAll('zone')
+  const searchText = searchParams.get('q') || ''
+  const tab = (searchParams.get('tab') as DomainTab) || 'all'
+  // Tag filter lives in the URL (?tag=a,b) so /tags and the palette can deep-link into it.
+  const tagFilter = (searchParams.get('tag') || '').split(',').filter(Boolean)
+  const [tagsToAssign, setTagsToAssign] = useState<string[]>([])
 
   const setParams = (updates: Record<string, string | null>) => {
     setSearchParams(
@@ -58,73 +80,72 @@ export default function Domains() {
     )
   }
 
-  const setSelectedRowKeys = (zoneIds: string[]) => {
-    setSearchParams(
-      (previous) => {
-        const next = new URLSearchParams(previous)
-        next.delete('zone')
-        zoneIds.forEach((zoneId) => next.append('zone', zoneId))
-        return next
-      },
-      { replace: true },
-    )
-  }
+  const selection = useDomainSelection()
+  const selectionMode = useSelectionMode((s) => s.on)
 
-  const { data: domains = [], isLoading } = useQuery<Zone[]>({
-    queryKey: ['domains'],
-    queryFn: async () => {
-      try {
-        const res = await api.get('/domains')
-        return res.data
-      } catch (error: any) {
-        if (error.response?.status === 400 && error.response?.data?.detail?.includes('credentials')) {
-          message.warning(t('Please add a Cloudflare account first'))
-          navigate('/accounts')
-        }
-        throw error
-      }
-    },
+  const setTagFilter = (tags: string[]) => setParams({ tag: tags.length > 0 ? tags.join(',') : null })
+
+  const { data: domains = [], isLoading, isError, error, refetch } = useDomains()
+  const { filtered, counts, allTags } = useDomainFilters(domains, {
+    search: searchText,
+    tab,
+    tags: tagFilter,
   })
 
+  // Account label for the header crumb — shares the ['cf-accounts'] cache with AccountSwitcher.
+  const activeAccountId = useAccountStore((s) => s.activeAccountId)
+  const { data: accounts = [] } = useQuery<CfAccount[]>({
+    queryKey: ['cf-accounts'],
+    queryFn: async () => (await api.get('/cf/accounts')).data,
+    staleTime: 60_000,
+  })
+  const account = accounts.find((a) => a.id === activeAccountId)
+  const accountLabel = account?.label || account?.email
+
   const createMutation = useMutation({
-    mutationFn: async (name: string) => {
-      const res = await api.post('/domains', { name })
-      return res.data
-    },
+    mutationFn: async (name: string) => (await api.post('/domains', { name })).data,
     onSuccess: () => {
       message.success(t('Domain added successfully'))
       setParams({ modal: null })
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['domains'] })
     },
-    onError: (error: any) => {
-      message.error(error.response?.data?.detail || t('Could not add domain'))
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: async (zoneId: string) => {
-      await api.delete(`/domains/${zoneId}`)
-    },
-    onSuccess: () => {
-      message.success(t('Domain deleted'))
-      queryClient.invalidateQueries({ queryKey: ['domains'] })
-    },
-    onError: (error: any) => {
-      message.error(error.response?.data?.detail || t('Could not delete domain'))
+    onError: (error) => {
+      message.error(apiErrorDetail(error) || t('Could not add domain'))
     },
   })
 
   const bulkMutation = useMutation({
     mutationFn: async (payload: { action: 'purge' | 'delete' }) => {
-      const res = await api.post('/domains/bulk', { ...payload, zoneIds: selectedRowKeys })
+      const res = await api.post('/domains/bulk', { ...payload, zoneIds: selection.selected })
       return res.data as { jobId: string }
     },
     onSuccess: (data) => {
       setParams({ job: data.jobId, modal: null })
     },
-    onError: (error: any) => {
-      message.error(error.response?.data?.detail || t('Bulk operation failed'))
+    onError: (error) => {
+      message.error(apiErrorDetail(error) || t('Bulk operation failed'))
+    },
+  })
+
+  const assignTagsMutation = useMutation({
+    mutationFn: async (tags: string[]) => {
+      await Promise.all(
+        selection.selected.map((zoneId) => {
+          const zone = domains.find((d) => d.id === zoneId)
+          const merged = [...new Set([...(zone?.tags || []), ...tags])]
+          return api.put(`/domains/${zoneId}/tags`, { tags: merged })
+        }),
+      )
+    },
+    onSuccess: () => {
+      message.success(t('Tags updated'))
+      setParams({ modal: null })
+      setTagsToAssign([])
+      queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+    onError: (error) => {
+      message.error(apiErrorDetail(error) || t('Could not update tags'))
     },
   })
 
@@ -143,217 +164,269 @@ export default function Domains() {
     queryClient.invalidateQueries({ queryKey: ['domains'] })
   }
 
-  const allTags = [...new Set(domains.flatMap((d) => d.tags || []))].sort()
+  const selectedZones = domains.filter((d) => selection.selectedSet.has(d.id))
+  const deleteConfirmText = t('delete {{count}} zone', { count: selection.selected.length })
 
-  const filteredDomains = domains.filter(
-    (domain) =>
-      domain.name.toLowerCase().includes(searchText.toLowerCase()) &&
-      (tagFilter.length === 0 || tagFilter.every((t) => (domain.tags || []).includes(t)))
-  )
-
-  const activeDomains = domains.filter((d) => d.status === 'active').length
-  const pendingDomains = domains.filter((d) => d.status === 'pending').length
-
-  const statusDot = (color: string, label: string) => (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ textTransform: 'capitalize' }}>{label}</span>
-    </span>
-  )
+  const tabs = [
+    { key: 'all', label: t('All'), count: counts.all },
+    { key: 'active', label: t('Active'), count: counts.active },
+    { key: 'pending', label: t('Pending'), count: counts.pending },
+    { key: 'tag', label: t('By tag'), count: tagFilter.length > 0 ? tagFilter.length : undefined },
+  ]
 
   const columns: ColumnsType<Zone> = [
     {
       title: 'Domain',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string) => <span style={{ fontWeight: 500, fontSize: 15 }}>{text}</span>,
+      render: (name: string) => (
+        <span className="font-mono text-[12px] font-medium text-fg">{name}</span>
+      ),
     },
     {
       title: 'Plan',
+      dataIndex: 'plan',
       key: 'plan',
-      width: 120,
-      filters: [...new Set(domains.map((d) => d.plan).filter((p): p is string => !!p))].sort().map((plan) => ({
-        text: plan.charAt(0).toUpperCase() + plan.slice(1),
-        value: plan,
-      })),
-      onFilter: (value, record) => record.plan === value,
-      render: (_: unknown, record: Zone) => {
-        if (!record.plan) return <span style={{ color: '#8f8f8f' }}>—</span>
-        const colors: Record<string, string> = { enterprise: 'gold', business: 'blue', pro: 'purple' }
-        return (
-          <Tag variant="filled" color={colors[record.plan] || 'default'}>
-            {record.plan.charAt(0).toUpperCase() + record.plan.slice(1)}
-          </Tag>
-        )
-      },
+      width: 110,
+      responsive: ['md'],
+      render: (plan?: string) =>
+        plan ? (
+          <span className="text-[12px] text-fg-2 capitalize">{plan}</span>
+        ) : (
+          <span className="text-fg-3">—</span>
+        ),
     },
     {
       title: t('Status'),
       dataIndex: 'status',
       key: 'status',
-      width: 130,
-      render: (status: string) =>
-        statusDot(status === 'active' ? '#28a948' : status === 'pending' ? '#ffae00' : '#8f8f8f', status),
+      width: 120,
+      render: (status: string) => (
+        <span className="inline-flex items-center gap-[6px]">
+          <Dot status={STATUS_DOT[status] || 'off'} />
+          <span className="text-[12px] capitalize">{status}</span>
+        </span>
+      ),
     },
     {
       title: 'SSL',
       key: 'ssl',
-      width: 130,
-      render: (_: unknown, record: Zone) => {
-        const sslMode = record.sslMode || record.ssl?.mode
-        const sslStatus = record.ssl?.status || 'unknown'
-        if (sslMode) {
-          return statusDot(sslMode !== 'off' ? '#28a948' : '#8f8f8f', sslMode)
-        }
-        if (sslStatus !== 'unknown') {
-          return statusDot(sslStatus === 'active' ? '#28a948' : '#ffae00', sslStatus)
-        }
-        return statusDot('#8f8f8f', 'unknown')
-      },
+      width: 110,
+      render: (_: unknown, zone: Zone) => <SslCell zone={zone} />,
     },
     {
       title: 'Tags',
       key: 'tags',
       width: 220,
-      render: (_: unknown, record: Zone) => (
-        <Space size={4} wrap>
-          {(record.tags || []).map((tag) => (
-            <Tag
+      render: (_: unknown, zone: Zone) => (
+        <span className="flex flex-wrap gap-1">
+          {(zone.tags || []).map((tag) => (
+            <button
               key={tag}
-              variant="filled"
-              style={{ cursor: 'pointer' }}
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0"
               onClick={(e) => {
                 e.stopPropagation()
-                setTagFilter([tag])
+                setParams({ tag, tab: 'tag' })
               }}
             >
-              {tag}
-            </Tag>
+              <Tag>{tag}</Tag>
+            </button>
           ))}
-        </Space>
+        </span>
       ),
     },
     {
       title: '',
-      key: 'actions',
-      width: 60,
-      render: (_: unknown, record: Zone) => (
-        <span onClick={(e) => e.stopPropagation()}>
-          <Popconfirm
-            title={t('Delete domain')}
-            description={t('Are you sure you want to delete {{name}}?', { name: record.name })}
-            okText={t('Delete')}
-            cancelText={t('Cancel')}
-            okButtonProps={{ danger: true, loading: deleteMutation.isPending }}
-            onConfirm={() => deleteMutation.mutate(record.id)}
-          >
-            <Button danger type="text" size="small" icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </span>
-      ),
+      key: 'chevron',
+      width: 36,
+      align: 'right',
+      render: () => <span className="text-[13px] text-fg-3">›</span>,
     },
   ]
 
-  return (
-    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
-      <PageHeader
-        title="Domains"
-        description={`${domains.length} domains · ${activeDomains} active · ${pendingDomains} pending`}
-      />
+  const barActions = (
+    <>
+      <Popconfirm
+        title={t('Bulk purge cache')}
+        description={t('Purge all cache for the {{count}} selected domain(s)?', {
+          count: selection.selected.length,
+        })}
+        okText={t('Purge')}
+        cancelText={t('Cancel')}
+        onConfirm={() => bulkMutation.mutate({ action: 'purge' })}
+      >
+        <BulkActionButton variant="primary" disabled={bulkMutation.isPending}>
+          ↻ {t('Purge cache')}
+        </BulkActionButton>
+      </Popconfirm>
+      <BulkActionButton onClick={() => setParams({ modal: 'bulk-dns' })}>
+        ⇄ {t('DNS replace')}
+      </BulkActionButton>
+      <BulkActionButton onClick={() => setParams({ modal: 'tags' })}>
+        ⊘ {t('Assign tags')}
+      </BulkActionButton>
+      <BulkActionButton variant="danger" onClick={() => setParams({ modal: 'delete' })}>
+        ▢ {t('Delete')}
+      </BulkActionButton>
+    </>
+  )
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Input
-          size="large"
-          prefix={<SearchOutlined style={{ color: '#8f8f8f' }} />}
-          placeholder={t('Search domains...')}
-          allowClear
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          className="min-w-[200px] flex-1"
+  return (
+    <div className="relative flex min-h-full flex-col">
+      <div className="flex-1 p-[clamp(12px,3vw,24px)]">
+        <PageHeader
+          title="Domains"
+          crumb={
+            accountLabel
+              ? `${accountLabel} · ${t('{{count}} zones', { count: domains.length })}`
+              : t('{{count}} zones', { count: domains.length })
+          }
+          actions={
+            <>
+              <Button onClick={() => setParams({ modal: 'bulk-add' })}>⊞ {t('Bulk add')}</Button>
+              <Button type="primary" onClick={() => setParams({ modal: 'add' })}>
+                + {t('Add domain')}
+              </Button>
+            </>
+          }
+          tabs={tabs}
+          activeTab={tab}
+          onTabChange={(key) => setParams({ tab: key === 'all' ? null : key })}
         />
-        <Select
-          mode="multiple"
-          allowClear
-          size="large"
-          placeholder={<><TagsOutlined /> {t('Filter by tag')}</>}
-          value={tagFilter}
-          onChange={setTagFilter}
-          options={allTags.map((t) => ({ value: t, label: t }))}
-          className="min-w-[160px]"
-        />
-        <Button size="large" icon={<AppstoreAddOutlined />} onClick={() => setParams({ modal: 'bulk-add' })}>
-          {t('Bulk add')}
-        </Button>
-        <Button size="large" type="primary" icon={<PlusOutlined />} onClick={() => setParams({ modal: 'add' })}>
-          {t('Add domain')}
-        </Button>
+
+        {isError && (
+          <Banner
+            tone="err"
+            className="mb-3"
+            actions={
+              <Button size="small" onClick={() => refetch()}>
+                ↻ {t('Retry')}
+              </Button>
+            }
+          >
+            {apiErrorDetail(error) || t('Could not load domains')}
+          </Banner>
+        )}
+
+        {/* Toolbar: search (?q= handed off from the palette) + tag picker on the "By tag" tab */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Input
+            prefix={<span className="text-fg-3">⌕</span>}
+            placeholder={t('Search domains...')}
+            allowClear
+            value={searchText}
+            onChange={(e) => setParams({ q: e.target.value || null })}
+            className="max-w-[260px] min-w-[180px] flex-1"
+          />
+          {(tab === 'tag' || tagFilter.length > 0) && (
+            <Select
+              mode="multiple"
+              allowClear
+              autoFocus={tab === 'tag'}
+              placeholder={t('Filter by tag')}
+              value={tagFilter}
+              onChange={setTagFilter}
+              options={allTags.map((tag) => ({ value: tag, label: tag }))}
+              className="min-w-[180px]"
+            />
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="flex flex-col gap-[14px] py-3" data-testid="domains-skeleton">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <SkeletonLine key={i} width={`${88 - (i % 4) * 9}%`} />
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* Mobile selection mode: pickable rows (.mrow.pick) instead of the table */}
+            {selectionMode && (
+              <div className="lg:hidden">
+                {filtered.map((zone) => {
+                  const on = selection.selectedSet.has(zone.id)
+                  return (
+                    <button
+                      key={zone.id}
+                      type="button"
+                      onClick={() => selection.toggle(zone.id)}
+                      className={`flex w-full cursor-pointer items-center gap-[11px] border-0 border-b border-solid border-stroke-2 px-[3px] py-[9px] text-left ${
+                        on ? 'bg-bg-sel' : 'bg-transparent'
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`grid h-[16px] w-[16px] flex-none place-items-center rounded-[4px] border border-solid text-[11px] leading-none ${
+                          on ? 'border-accent bg-accent text-white' : 'border-stroke bg-bg text-transparent'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-[12.5px] font-medium text-fg">
+                          {zone.name}
+                        </span>
+                        <span className="mt-[3px] block truncate font-mono text-[11px] text-fg-3">
+                          {[zone.plan, zone.status, zone.sslMode ? `ssl ${zone.sslMode}` : null]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+                {filtered.length === 0 && (
+                  <EmptyState icon="◈" title={t('No domains')} desc={t('No domains match the current filter')} />
+                )}
+              </div>
+            )}
+
+            <div className={selectionMode ? 'hidden lg:block' : undefined}>
+              <Table
+                dataSource={filtered}
+                rowKey="id"
+                columns={columns}
+                rowClassName="hover-row"
+                onRow={(record) => ({ onClick: () => navigate(`/domains/${record.id}`) })}
+                rowSelection={{
+                  selectedRowKeys: selection.selected,
+                  preserveSelectedRowKeys: true,
+                  onChange: (keys: Key[]) => selection.setSelected(keys as string[]),
+                }}
+                locale={{
+                  emptyText: (
+                    <EmptyState
+                      icon="◈"
+                      title={t('No domains')}
+                      desc={
+                        searchText || tagFilter.length > 0 || tab !== 'all'
+                          ? t('No domains match the current filter')
+                          : t('Add your first domain to get started')
+                      }
+                      actions={
+                        <Button type="primary" size="small" onClick={() => setParams({ modal: 'add' })}>
+                          + {t('Add domain')}
+                        </Button>
+                      }
+                    />
+                  ),
+                }}
+                pagination={{
+                  pageSize: 20,
+                  showSizeChanger: true,
+                  showTotal: (total) => t('Total {{total}} domains', { total }),
+                }}
+                scroll={{ x: 'max-content' }}
+              />
+            </div>
+          </>
+        )}
       </div>
 
-      <Space orientation="vertical" style={{ width: '100%' }} size="large">
-          {selectedRowKeys.length > 0 && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                flexWrap: 'wrap',
-                padding: '10px 14px',
-                background: token.colorFillQuaternary,
-                borderRadius: 8,
-              }}
-            >
-              <Text strong>{t('{{count}} domain(s) selected', { count: selectedRowKeys.length })}</Text>
-              <Popconfirm
-                title={t('Bulk purge cache')}
-                description={t('Purge all cache for the {{count}} selected domain(s)?', { count: selectedRowKeys.length })}
-                okText={t('Purge')}
-                cancelText={t('Cancel')}
-                onConfirm={() => bulkMutation.mutate({ action: 'purge' })}
-              >
-                <Button icon={<ReloadOutlined />} loading={bulkMutation.isPending}>
-                  {t('Purge cache')}
-                </Button>
-              </Popconfirm>
-              <Button icon={<SwapOutlined />} onClick={() => setParams({ modal: 'bulk-dns' })}>
-                {t('Bulk DNS replace')}
-              </Button>
-              <Popconfirm
-                title={t('Bulk delete domains')}
-                description={t('Delete the {{count}} selected domain(s) from Cloudflare? This action cannot be undone.', { count: selectedRowKeys.length })}
-                okText={t('Delete')}
-                cancelText={t('Cancel')}
-                okButtonProps={{ danger: true }}
-                onConfirm={() => bulkMutation.mutate({ action: 'delete' })}
-              >
-                <Button danger icon={<DeleteOutlined />} loading={bulkMutation.isPending}>
-                  {t('Delete domains')}
-                </Button>
-              </Popconfirm>
-              <Button type="text" onClick={() => setSelectedRowKeys([])}>
-                {t('Clear selection')}
-              </Button>
-            </div>
-          )}
-          <Table
-            loading={isLoading}
-            dataSource={filteredDomains}
-            rowKey="id"
-            columns={columns}
-            rowClassName="hover-row"
-            onRow={(record) => ({ onClick: () => navigate(`/domains/${record.id}`) })}
-            rowSelection={{
-              selectedRowKeys,
-              preserveSelectedRowKeys: true,
-              onChange: (keys: Key[]) => setSelectedRowKeys(keys as string[]),
-            }}
-            pagination={{
-              pageSize: 20,
-              showSizeChanger: true,
-              showTotal: (total) => t('Total {{total}} domains', { total }),
-            }}
-            scroll={{ x: 'max-content' }}
-          />
-        </Space>
+      <BulkActionBar count={selection.selected.length} onClear={selection.clear}>
+        {barActions}
+      </BulkActionBar>
 
       <Modal
         title={t('Add new domain')}
@@ -367,11 +440,7 @@ export default function Domains() {
         cancelText={t('Cancel')}
         confirmLoading={createMutation.isPending}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={(values) => createMutation.mutate(values.name.trim())}
-        >
+        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate(values.name.trim())}>
           <Form.Item
             label={t('Domain name')}
             name="name"
@@ -387,6 +456,46 @@ export default function Domains() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title={t('Assign tags')}
+        open={activeModal === 'tags'}
+        onCancel={() => setParams({ modal: null })}
+        onOk={() => assignTagsMutation.mutate(tagsToAssign)}
+        okText={t('Assign')}
+        cancelText={t('Cancel')}
+        okButtonProps={{ disabled: tagsToAssign.length === 0 }}
+        confirmLoading={assignTagsMutation.isPending}
+        destroyOnHidden
+      >
+        <p className="mb-2 text-[12.5px] text-fg-2">
+          {t('Tags will be added to the {{count}} selected domain(s).', {
+            count: selection.selected.length,
+          })}
+        </p>
+        <Select
+          mode="tags"
+          autoFocus
+          style={{ width: '100%' }}
+          placeholder={t('Choose or type new tags')}
+          value={tagsToAssign}
+          onChange={setTagsToAssign}
+          options={allTags.map((tag) => ({ value: tag, label: tag }))}
+        />
+      </Modal>
+
+      <ConfirmDestructive
+        open={activeModal === 'delete'}
+        title={t('Delete {{count}} zones from Cloudflare?', { count: selection.selected.length })}
+        items={selectedZones.map((z) => ({ key: z.id, label: z.name, meta: z.status }))}
+        explanation={t(
+          'All DNS records, page rules and cache configuration of these zones will be permanently deleted on Cloudflare. Websites will stop working if their nameservers still point to Cloudflare.',
+        )}
+        confirmText={deleteConfirmText}
+        loading={bulkMutation.isPending}
+        onConfirm={() => bulkMutation.mutate({ action: 'delete' })}
+        onCancel={() => setParams({ modal: null })}
+      />
 
       <BulkProgressModal
         jobId={jobId}
@@ -404,8 +513,7 @@ export default function Domains() {
       <BulkDnsReplaceModal
         open={activeModal === 'bulk-dns'}
         onClose={() => setParams({ modal: null })}
-        onJobCreated={(id) => setParams({ modal: null, job: id })}
-        zoneIds={selectedRowKeys}
+        zoneIds={selection.selected}
         zoneNames={Object.fromEntries(domains.map((d) => [d.id, d.name]))}
       />
     </div>

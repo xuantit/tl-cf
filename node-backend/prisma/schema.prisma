@@ -12,11 +12,29 @@ model User {
   email        String              @unique
   passwordHash String
   role         String              @default("user")
+  displayName  String?
   isActive     Boolean             @default(true)
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
   cfAccounts   CloudflareAccount[]
   dnsTemplates DnsTemplate[]
+  tags         Tag[]
+  tagRules     TagRule[]
+  sessions     Session[]
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  userId     String
+  jti        String    @unique
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model CloudflareAccount {
@@ -47,6 +65,32 @@ model Domain {
   updatedAt    DateTime          @updatedAt
 
   @@index([accountId])
+}
+
+model Tag {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  templateId  String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+}
+
+model TagRule {
+  id        String   @id @default(uuid())
+  userId    String
+  field     String // "name" | "plan"
+  op        String // "endsWith" | "startsWith" | "contains" | "equals"
+  value     String
+  tag       String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model DnsTemplate {

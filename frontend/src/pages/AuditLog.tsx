@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Card, Table, Tag, Typography, Button, Space, Input, Tooltip } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { Table, Button, Input, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
-import { api } from '../services/api'
-
-const { Title, Text } = Typography
+import { api, apiErrorDetail } from '../services/api'
+import PageHeader from '../components/PageHeader'
+import { Banner, EmptyState, Tag } from '../components/ui'
+import { formatClock } from '../utils/format'
 
 interface AuditEntry {
   id: string
@@ -25,13 +25,6 @@ interface AuditResponse {
   page: number
   limit: number
   items: AuditEntry[]
-}
-
-const METHOD_COLORS: Record<string, string> = {
-  POST: 'green',
-  PUT: 'blue',
-  PATCH: 'blue',
-  DELETE: 'red',
 }
 
 // Map path pattern → action label (translated via t())
@@ -74,7 +67,7 @@ export default function AuditLog() {
   const [page, setPage] = useState(1)
   const [pathFilter, setPathFilter] = useState('')
 
-  const { data, isLoading, refetch, isFetching } = useQuery<AuditResponse>({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<AuditResponse>({
     queryKey: ['audit', page, pathFilter],
     queryFn: async () =>
       (
@@ -89,46 +82,64 @@ export default function AuditLog() {
     {
       title: t('Time'),
       dataIndex: 'createdAt',
-      width: 165,
-      render: (v: string) => new Date(v).toLocaleString(dateLocale),
+      width: 130,
+      render: (v: string) => (
+        <span className="font-mono text-[11px] text-fg-2" title={new Date(v).toLocaleString(dateLocale)}>
+          {formatClock(v, true)}
+        </span>
+      ),
     },
     {
-      title: t('User'),
+      title: 'Actor',
       dataIndex: 'email',
       width: 200,
       ellipsis: true,
-      render: (email: string | null) => email || <Text type="secondary">—</Text>,
+      render: (email: string | null) =>
+        email ? (
+          <span className="font-mono text-[12px] font-medium text-fg">{email}</span>
+        ) : (
+          <span className="text-fg-3">—</span>
+        ),
     },
     {
       title: t('Action'),
       key: 'action',
+      width: 190,
       render: (_, r) => {
         const label = actionLabel(r.path)
-        return (
-          <Space orientation="vertical" size={0}>
-            {label && <Text>{t(label)}</Text>}
-            <Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              <Tag color={METHOD_COLORS[r.method] || 'default'} variant="filled" style={{ marginRight: 4 }}>
-                {r.method}
-              </Tag>
-              {r.path}
-            </Text>
-          </Space>
-        )
+        const isAuth = /^\/api\/auth\//.test(r.path)
+        const variant = isAuth ? 'default' : r.method === 'DELETE' ? 'err' : 'acc'
+        return <Tag variant={variant}>{label ? t(label) : r.method.toLowerCase()}</Tag>
       },
+    },
+    {
+      title: t('Target'),
+      key: 'target',
+      ellipsis: true,
+      render: (_, r) => (
+        <span className="font-mono text-[11px] text-fg-3">
+          {r.method} {r.path}
+        </span>
+      ),
+    },
+    {
+      title: 'IP',
+      dataIndex: 'ip',
+      width: 130,
+      ellipsis: true,
+      render: (ip: string | null) =>
+        ip ? <span className="font-mono text-[11px] text-fg-2">{ip}</span> : <span className="text-fg-3">—</span>,
     },
     {
       title: t('Result'),
       dataIndex: 'status',
-      width: 100,
-      render: (status: number) => (
-        <Tag color={status < 400 ? 'success' : status < 500 ? 'warning' : 'error'} variant="filled">{status}</Tag>
-      ),
+      width: 90,
+      render: (status: number) => <Tag variant={status < 400 ? 'ok' : 'err'}>{status}</Tag>,
     },
     {
-      title: t('Details'),
+      title: '',
       dataIndex: 'meta',
-      width: 90,
+      width: 70,
       render: (meta: unknown) =>
         meta ? (
           <Tooltip
@@ -137,62 +148,71 @@ export default function AuditLog() {
           >
             <Button type="link" size="small">{t('View')}</Button>
           </Tooltip>
-        ) : (
-          <Text type="secondary">—</Text>
-        ),
-    },
-    {
-      title: 'IP',
-      dataIndex: 'ip',
-      width: 120,
-      ellipsis: true,
-      render: (ip: string | null) => ip || <Text type="secondary">—</Text>,
+        ) : null,
     },
   ]
 
   return (
-    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
-            {t('Audit trail')}
-          </Title>
-          <Text type="secondary">
-            {t('Records every data-changing action (login, create/update/delete). Sensitive fields are masked.')}
-          </Text>
-        </div>
-        <Space>
-          <Input.Search
-            placeholder={t('Filter by path (e.g. /api/domains)')}
-            allowClear
-            style={{ width: '100%', maxWidth: 280 }}
-            onSearch={(v) => {
-              setPage(1)
-              setPathFilter(v.trim())
-            }}
-          />
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-            {t('Reload')}
-          </Button>
-        </Space>
-      </div>
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={data?.items || []}
-          loading={isLoading}
-          scroll={{ x: 'max-content' }}
-          pagination={{
-            current: page,
-            pageSize: 50,
-            total: data?.total || 0,
-            onChange: setPage,
-            showSizeChanger: false,
-            showTotal: (total) => t('{{total}} records', { total }),
-          }}
-        />
-      </Card>
+    <div className="fade-in p-[clamp(12px,3vw,24px)]">
+      <PageHeader
+        title={t('Audit log')}
+        crumb={
+          data ? `${t('{{total}} records', { total: data.total })} · ${t('immutable')}` : t('immutable')
+        }
+        actions={
+          <>
+            <Input.Search
+              placeholder={t('Filter by path (e.g. /api/domains)')}
+              allowClear
+              style={{ width: 240 }}
+              onSearch={(v) => {
+                setPage(1)
+                setPathFilter(v.trim())
+              }}
+            />
+            <Button onClick={() => refetch()} loading={isFetching}>
+              ↻ {t('Reload')}
+            </Button>
+          </>
+        }
+      />
+      {isError && (
+        <Banner
+          tone="err"
+          className="mb-3"
+          actions={
+            <Button size="small" onClick={() => refetch()}>
+              ↻ {t('Retry')}
+            </Button>
+          }
+        >
+          {apiErrorDetail(error) || t('Could not load the audit log')}
+        </Banner>
+      )}
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data?.items || []}
+        loading={isLoading}
+        scroll={{ x: 'max-content' }}
+        locale={{
+          emptyText: (
+            <EmptyState
+              icon="✎"
+              title={t('No audit entries')}
+              desc={pathFilter ? t('No entries match the current filter') : t('Mutating requests will appear here')}
+            />
+          ),
+        }}
+        pagination={{
+          current: page,
+          pageSize: 50,
+          total: data?.total || 0,
+          onChange: setPage,
+          showSizeChanger: false,
+          showTotal: (total) => t('{{total}} records', { total }),
+        }}
+      />
     </div>
   )
 }

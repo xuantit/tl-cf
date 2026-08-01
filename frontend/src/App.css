@@ -6,11 +6,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background-color: #fafafa;
-}
-
-body.dark .auth-container {
-  background-color: #0a0a0a;
+  background-color: var(--bg-app);
 }
 
 .auth-card {
@@ -25,12 +21,14 @@ body.dark .auth-container {
   margin-bottom: 24px;
 }
 
-/* Tabler-style table headers: small uppercase secondary labels */
+/* Console 1a table headers: mono uppercase micro labels */
 .ant-table-thead > tr > th {
-  font-size: 12px !important;
-  font-weight: 600 !important;
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
+  color: var(--fg-3) !important;
 }
 
 /* Keep row separators light so content leads */
@@ -38,28 +36,29 @@ body.dark .auth-container {
   border-bottom-width: 1px;
 }
 
-.stat-card {
-  cursor: default;
-  transition: transform 0.2s ease, border-color 0.2s ease;
+/* Selected rows use the Console 1a selection tint (.tr.sel → bg-sel) */
+.ant-table-tbody > tr.ant-table-row-selected > td {
+  background: var(--bg-sel) !important;
 }
 
-.stat-card:hover {
-  transform: translateY(-2px);
-  border-color: #f6821f;
+/* Table density preference (Settings → Giao diện) — body class set from useUiPrefStore */
+body.density-comfortable {
+  --row-h: 36px;
 }
 
-.icon-chip {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
+body.density-spacious {
+  --row-h: 44px;
+}
+
+body.density-comfortable .ant-table-tbody > tr > td {
+  padding-block: 10px !important;
+}
+
+body.density-spacious .ant-table-tbody > tr > td {
+  padding-block: 14px !important;
 }
 
 .hover-row {
-  transition: background 0.15s ease;
+  transition: background var(--d1) var(--ease);
   cursor: pointer;
 }

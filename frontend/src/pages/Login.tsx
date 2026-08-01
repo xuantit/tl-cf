@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Form, Input, Button, Card, Alert } from 'antd'
-import { UserOutlined, LockOutlined, CloudOutlined } from '@ant-design/icons'
+import { Form, Input, Button, Alert } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/useAuthStore'
-import '../App.css'
+import { Tag } from '../components/ui'
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-mono text-[11px] uppercase tracking-[.09em] text-fg-3">{children}</span>
+  )
+}
 
 export default function Login() {
   const { t } = useTranslation()
@@ -42,27 +47,18 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-container">
-      <Card className="auth-card">
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 14,
-              background: '#f6821f',
-              color: '#fff',
-              fontSize: 24,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 16,
-            }}
-          >
-            <CloudOutlined />
+    <div className="grid min-h-screen place-items-center bg-bg-app p-5">
+      <div className="fade-in w-[340px] max-w-full rounded-xl border border-solid border-stroke bg-bg p-[26px_24px] shadow-[0_8px_30px_-12px_rgb(0_0_0/.12)]">
+        <div className="mb-5 flex items-center gap-2">
+          <div className="grid h-6 w-6 flex-none place-items-center rounded-[6px] bg-accent text-[13px] text-white">
+            ☁
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Cloudflare Tool</div>
-          <div style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4 }}>{t('Sign in to your account')}</div>
+          <div className="font-mono text-[13px] font-semibold text-fg">CF Tool</div>
+          <Tag className="ml-auto">v2</Tag>
+        </div>
+        <div className="text-[15px] font-semibold tracking-[-.02em] text-fg">{t('Sign In')}</div>
+        <div className="mt-[3px] mb-[18px] font-mono text-[11.5px] text-fg-3">
+          {t('Cloudflare admin console')}
         </div>
         {err && (
           <Alert
@@ -71,41 +67,45 @@ export default function Login() {
             showIcon
             closable
             onClose={() => setErr('')}
-            style={{ marginBottom: 16 }}
+            style={{ marginBottom: 14 }}
           />
         )}
-        <Form onFinish={onFinish} layout="vertical" size="large">
+        <Form onFinish={onFinish} layout="vertical" requiredMark={false}>
           <Form.Item
             name="email"
-            label="Email"
+            label={<FieldLabel>Email</FieldLabel>}
             rules={[{ required: true, type: 'email', message: t('Please enter a valid email') }]}
+            style={{ marginBottom: 11 }}
           >
-            <Input
-              prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
-              placeholder="your-email@example.com"
-            />
+            <Input placeholder="your-email@example.com" className="font-mono" autoFocus />
           </Form.Item>
           <Form.Item
             name="password"
-            label={t('Password')}
+            label={<FieldLabel>{t('Password')}</FieldLabel>}
             rules={[{ required: true, message: t('Please enter your password') }]}
+            style={{ marginBottom: 11 }}
           >
-            <Input.Password
-              prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
-              placeholder={t('Enter your password')}
-            />
+            <Input.Password placeholder="••••••••••••" className="font-mono" />
           </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block size="large" style={{ height: 44, fontWeight: 600 }}>
-              {t('Sign In')}
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={loading}
+              block
+              style={{ height: 32, marginTop: 6 }}
+            >
+              {t('Sign In')} →
             </Button>
           </Form.Item>
         </Form>
-        <div style={{ textAlign: 'center', marginTop: 16, color: '#8c8c8c' }}>
-          {t("Don't have an account?")}{' '}
-          <Link to="/register" style={{ fontWeight: 500 }}>{t('Sign up')}</Link>
+        <div className="mt-4 flex items-center gap-2 font-mono text-[11px] text-fg-3">
+          <span>{t('An invite code is needed to register')}</span>
+          <Link to="/register" className="ml-auto text-accent no-underline hover:text-accent-hover">
+            {t('Sign up')} →
+          </Link>
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

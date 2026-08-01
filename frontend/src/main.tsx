@@ -11,6 +11,7 @@ import './i18n'
 import './index.css'
 import App from './App.tsx'
 import { useThemeStore } from './stores/useThemeStore'
+import { useUiPrefStore } from './stores/useUiPrefStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,15 +19,22 @@ const queryClient = new QueryClient({
   },
 })
 
-function ThemedApp() {
+// Exported so react-refresh can track this component (entry file)
+export function ThemedApp() {
   const dark = useThemeStore((s) => s.dark)
+  const density = useUiPrefStore((s) => s.density)
   const { i18n } = useTranslation()
 
   useEffect(() => {
-    document.body.style.background = dark ? '#0a0a0a' : '#ffffff'
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
     document.body.classList.toggle('dark', dark)
   }, [dark])
+
+  // Table density preference (Settings → Giao diện) — tables pick it up via CSS in App.css.
+  useEffect(() => {
+    document.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious')
+    document.body.classList.add(`density-${density}`)
+  }, [density])
 
   return (
     <ConfigProvider
@@ -36,43 +44,51 @@ function ThemedApp() {
         token: {
           colorPrimary: '#f6821f',
           colorLink: '#0070f3',
-          // Vercel-style: tight radius family, borders over shadows
+          // Console 1a: tight radius family, borders over shadows, dense controls
           borderRadius: 6,
           borderRadiusLG: 8,
           borderRadiusSM: 4,
           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
           fontSize: 14,
-          colorBgLayout: dark ? '#0a0a0a' : '#ffffff',
-          colorBgContainer: dark ? '#111111' : '#ffffff',
-          colorBorderSecondary: dark ? '#26262e' : '#eaeaea',
-          colorTextSecondary: dark ? '#a1a1aa' : '#666666',
+          controlHeight: 30,
+          colorBgLayout: dark ? '#08090b' : '#f6f6f7',
+          colorBgContainer: dark ? '#0d0e11' : '#ffffff',
+          colorBorder: dark ? '#22242a' : '#e7e7ea',
+          colorSplit: dark ? '#1a1c21' : '#f0f0f2',
+          colorBorderSecondary: dark ? '#1a1c21' : '#f0f0f2',
+          colorText: dark ? '#f0f1f3' : '#101114',
+          colorTextSecondary: dark ? '#aab0ba' : '#4d525a',
+          colorTextTertiary: dark ? '#7f8591' : '#767c86',
           boxShadow: 'none',
           boxShadowSecondary:
             '0 1px 1px rgba(0,0,0,0.02), 0 4px 8px -4px rgba(0,0,0,0.04), 0 16px 24px -8px rgba(0,0,0,0.06)',
         },
         components: {
           Card: { boxShadowTertiary: 'none', borderRadiusLG: 8, paddingLG: 24 },
-          Modal: { borderRadiusLG: 8 },
+          Modal: { borderRadiusLG: 12 },
+          Drawer: { borderRadiusLG: 12 },
           Table: {
             headerBg: 'transparent',
             headerSplitColor: 'transparent',
-            headerColor: dark ? '#a1a1aa' : '#666666',
-            cellPaddingBlock: 12,
-            rowHoverBg: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+            headerColor: dark ? '#7f8591' : '#767c86',
+            cellPaddingBlock: 7,
+            cellPaddingInline: 10,
+            fontSize: 13,
+            rowHoverBg: dark ? '#15171b' : '#f7f7f8',
           },
           Menu: {
-            itemBorderRadius: 8,
-            itemSelectedBg: 'rgba(246,130,31,0.12)',
+            itemBorderRadius: 6,
+            itemSelectedBg: dark ? '#2a1a09' : '#fff2e5',
             itemSelectedColor: '#f6821f',
             itemMarginInline: 8,
           },
           Layout: {
-            siderBg: dark ? '#17171c' : '#ffffff',
-            headerBg: dark ? 'rgba(23,23,28,0.8)' : 'rgba(255,255,255,0.8)',
+            siderBg: dark ? '#0a0b0e' : '#fbfbfc',
+            headerBg: dark ? 'rgba(13,14,17,0.8)' : 'rgba(255,255,255,0.8)',
           },
-          Button: { fontWeight: 500 },
+          Button: { fontWeight: 500, fontSize: 13 },
           Tabs: { horizontalMargin: '0 0 12px 0' },
-          Form: { labelColor: dark ? '#e4e4e7' : '#171717', verticalLabelPadding: '0 0 6px' },
+          Form: { labelColor: dark ? '#f0f1f3' : '#101114', verticalLabelPadding: '0 0 6px' },
         },
       }}
     >

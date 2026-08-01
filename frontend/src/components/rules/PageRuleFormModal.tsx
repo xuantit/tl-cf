@@ -8,10 +8,12 @@ const { Text } = Typography
 
 type RuleStatus = 'active' | 'disabled'
 
+type ActionValue = string | number | boolean | Record<string, unknown>
+
 type FormValues = {
   targetValue: string
   status: RuleStatus
-  actions: Array<{ id?: string; value?: any }>
+  actions: Array<{ id?: string; value?: ActionValue }>
 }
 
 interface Props {
@@ -72,7 +74,7 @@ function toFormValues(initialValue?: PageRuleInput, zoneName?: string): FormValu
   return {
     targetValue: initialValue?.targets?.[0]?.constraint?.value ?? (zoneName ? `www.${zoneName}/*` : ''),
     status: (initialValue?.status as RuleStatus) ?? 'active',
-    actions: initialValue?.actions?.length ? initialValue.actions : [],
+    actions: initialValue?.actions?.length ? (initialValue.actions as FormValues['actions']) : [],
   }
 }
 
@@ -193,7 +195,7 @@ export default function PageRuleFormModal({
     form.setFieldsValue({
       targetValue: values.targets[0]?.constraint.value ?? '',
       status: values.status ?? 'active',
-      actions: values.actions.map((action) => ({ id: action.id, value: action.value })),
+      actions: values.actions.map((action) => ({ id: action.id, value: action.value as ActionValue })),
     })
   }
 

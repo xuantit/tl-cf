@@ -28,10 +28,11 @@ import {
   CloudDownloadOutlined,
   SendOutlined,
 } from '@ant-design/icons'
-import { api } from '../services/api'
+import { api, apiErrorDetail } from '../services/api'
 import { useTranslation } from 'react-i18next'
 import BulkProgressModal from '../components/BulkProgressModal'
 import PageHeader from '../components/PageHeader'
+import { Banner } from '../components/ui'
 
 const { Text } = Typography
 
@@ -88,7 +89,7 @@ export default function Templates() {
     )
   }
 
-  const { data: templates = [], isLoading } = useQuery<DnsTemplate[]>({
+  const { data: templates = [], isLoading, isError, error, refetch } = useQuery<DnsTemplate[]>({
     queryKey: ['templates'],
     queryFn: async () => (await api.get('/templates')).data,
   })
@@ -148,7 +149,7 @@ export default function Templates() {
       editorForm.resetFields()
       invalidate()
     },
-    onError: (e: any) => message.error(e.response?.data?.detail || t('Could not save template')),
+    onError: (error) => message.error(apiErrorDetail(error) || t('Could not save template')),
   })
 
   const deleteMutation = useMutation({
@@ -157,7 +158,7 @@ export default function Templates() {
       message.success(t('Template deleted'))
       invalidate()
     },
-    onError: (e: any) => message.error(e.response?.data?.detail || t('Could not delete template')),
+    onError: (error) => message.error(apiErrorDetail(error) || t('Could not delete template')),
   })
 
   const fromZoneMutation = useMutation({
@@ -174,7 +175,7 @@ export default function Templates() {
       fromZoneForm.resetFields()
       invalidate()
     },
-    onError: (e: any) => message.error(e.response?.data?.detail || t('Could not create template')),
+    onError: (error) => message.error(apiErrorDetail(error) || t('Could not create template')),
   })
 
   const applyMutation = useMutation({
@@ -187,7 +188,7 @@ export default function Templates() {
       ).data as { jobId: string }
     },
     onSuccess: (data) => setParams({ apply: null, mode: null, zone: null, job: data.jobId }),
-    onError: (e: any) => message.error(e.response?.data?.detail || t('Could not apply template')),
+    onError: (error) => message.error(apiErrorDetail(error) || t('Could not apply template')),
   })
 
   const closeApply = () => {
@@ -271,6 +272,20 @@ export default function Templates() {
           </>
         }
       />
+
+      {isError && (
+        <Banner
+          tone="err"
+          className="mt-3"
+          actions={
+            <Button size="small" onClick={() => refetch()}>
+              ↻ {t('Retry')}
+            </Button>
+          }
+        >
+          {apiErrorDetail(error) || t('Could not load templates')}
+        </Banner>
+      )}
 
       <Card style={{ marginTop: 16 }}>
         <Space orientation="vertical" style={{ width: '100%' }} size="large">

@@ -33,7 +33,7 @@ describe('ModernRulesPanel', () => {
   })
 
   it('renders kind tabs and add button', async () => {
-    ;(api.get as any).mockResolvedValue({ data: { rules: [], quota: { used: 0 }, warnings: [] } })
+    vi.mocked(api.get).mockResolvedValue({ data: { rules: [], quota: { used: 0 }, warnings: [] } })
 
     renderPanel('z1', ['/domains/z1?tab=rules'])
 
@@ -44,7 +44,7 @@ describe('ModernRulesPanel', () => {
   })
 
   it('loads rules for the zone and kind from URL', async () => {
-    ;(api.get as any).mockImplementation((url: string) => {
+    vi.mocked(api.get).mockImplementation((url: string) => {
       if (url === '/rules/z1/redirect') {
         return Promise.resolve({
           data: {
