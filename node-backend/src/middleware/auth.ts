@@ -1,7 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { eq } from "drizzle-orm";
 
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { sessions, users } from "../db/schema.js";
 import { env } from "../utils/env.js";
 import logger from "../utils/logger.js";
 
@@ -31,14 +33,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   // Kiểm tra trạng thái thật trong DB — user bị khoá/xoá hoặc bị đổi role thì token cũ hết tác dụng ngay.
   // Token có jti (phát hành sau B5) → check thêm session chưa bị revoke. Token cũ không jti vẫn hợp lệ.
   const [user, session] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: payload.userId },
-      select: { isActive: true, role: true },
+    db.query.users.findFirst({
+      where: eq(users.id, payload.userId),
+      columns: { isActive: true, role: true },
     }),
     payload.jti
-      ? prisma.session.findUnique({
-          where: { jti: payload.jti },
-          select: { id: true, revokedAt: true, lastSeenAt: true },
+      ? db.query.sessions.findFirst({
+          where: eq(sessions.jti, payload.jti),
+          columns: { id: true, revokedAt: true, lastSeenAt: true },
         })
       : Promise.resolve(null),
   ]);
@@ -51,8 +53,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     // Cập nhật lastSeenAt throttled (fire-and-forget, không chặn request)
     if (Date.now() - session.lastSeenAt.getTime() > LAST_SEEN_THROTTLE_MS) {
-      prisma.session
-        .update({ where: { id: session.id }, data: { lastSeenAt: new Date() } })
+      db.update(sessions)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(sessions.id, session.id))
         .catch((e) => logger.warn("Failed to update session lastSeenAt", { error: (e as Error).message }));
     }
   }

@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
+import { and, desc, eq } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
 import { cloudflareService, type DnsRecord } from "../services/cloudflare.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { dnsTemplates } from "../db/schema.js";
 import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import logger from "../utils/logger.js";
@@ -57,9 +59,9 @@ function resolveRecordForZone(record: TemplateRecord, zoneName: string): Templat
 templatesRouter.get("/", async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
-    const templates = await prisma.dnsTemplate.findMany({
-      where: { userId: auth.userId },
-      orderBy: { createdAt: "desc" },
+    const templates = await db.query.dnsTemplates.findMany({
+      where: eq(dnsTemplates.userId, auth.userId),
+      orderBy: desc(dnsTemplates.createdAt),
     });
     res.json(templates.map(serializeTemplate));
   } catch (error: any) {
@@ -71,14 +73,15 @@ templatesRouter.post("/", async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
     const body = templateBodySchema.parse(req.body);
-    const template = await prisma.dnsTemplate.create({
-      data: {
+    const [template] = await db
+      .insert(dnsTemplates)
+      .values({
         userId: auth.userId,
         name: body.name,
         description: body.description,
         recordsJson: JSON.stringify(body.records),
-      },
-    });
+      })
+      .returning();
     res.status(201).json(serializeTemplate(template));
   } catch (error: any) {
     res.status(400).json({ detail: error.message || "Failed to create template" });
@@ -89,20 +92,21 @@ templatesRouter.put("/:id", async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
     const body = templateBodySchema.parse(req.body);
-    const existing = await prisma.dnsTemplate.findFirst({
-      where: { id: req.params.id, userId: auth.userId },
+    const existing = await db.query.dnsTemplates.findFirst({
+      where: and(eq(dnsTemplates.id, req.params.id), eq(dnsTemplates.userId, auth.userId)),
     });
     if (!existing) {
       return res.status(404).json({ detail: "Template not found" });
     }
-    const template = await prisma.dnsTemplate.update({
-      where: { id: req.params.id },
-      data: {
+    const [template] = await db
+      .update(dnsTemplates)
+      .set({
         name: body.name,
         description: body.description,
         recordsJson: JSON.stringify(body.records),
-      },
-    });
+      })
+      .where(eq(dnsTemplates.id, req.params.id))
+      .returning();
     res.json(serializeTemplate(template));
   } catch (error: any) {
     res.status(400).json({ detail: error.message || "Failed to update template" });
@@ -112,13 +116,13 @@ templatesRouter.put("/:id", async (req, res) => {
 templatesRouter.delete("/:id", async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
-    const existing = await prisma.dnsTemplate.findFirst({
-      where: { id: req.params.id, userId: auth.userId },
+    const existing = await db.query.dnsTemplates.findFirst({
+      where: and(eq(dnsTemplates.id, req.params.id), eq(dnsTemplates.userId, auth.userId)),
     });
     if (!existing) {
       return res.status(404).json({ detail: "Template not found" });
     }
-    await prisma.dnsTemplate.delete({ where: { id: req.params.id } });
+    await db.delete(dnsTemplates).where(eq(dnsTemplates.id, req.params.id));
     res.status(204).send();
   } catch (error: any) {
     res.status(400).json({ detail: error.message || "Failed to delete template" });
@@ -154,14 +158,15 @@ templatesRouter.post("/from-zone/:zoneId", async (req, res) => {
         priority: r.priority,
       }));
 
-    const template = await prisma.dnsTemplate.create({
-      data: {
+    const [template] = await db
+      .insert(dnsTemplates)
+      .values({
         userId: auth.userId,
         name: body.name,
         description: body.description || `Tạo từ ${zone.name}`,
         recordsJson: JSON.stringify(templateRecords),
-      },
-    });
+      })
+      .returning();
     res.status(201).json(serializeTemplate(template));
   } catch (error: any) {
     res.status(400).json({ detail: error.message || "Failed to create template from zone" });
@@ -181,8 +186,8 @@ templatesRouter.post("/:id/apply", async (req, res) => {
   });
   try {
     const body = bodySchema.parse(req.body);
-    const template = await prisma.dnsTemplate.findFirst({
-      where: { id: req.params.id, userId: auth.userId },
+    const template = await db.query.dnsTemplates.findFirst({
+      where: and(eq(dnsTemplates.id, req.params.id), eq(dnsTemplates.userId, auth.userId)),
     });
     if (!template) {
       return res.status(404).json({ detail: "Template not found" });

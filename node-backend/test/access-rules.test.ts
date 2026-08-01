@@ -2,10 +2,13 @@ import request from "supertest";
 import bcrypt from "bcryptjs";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { and, eq } from "drizzle-orm";
+
 import { app } from "../src/app.js";
 import { cloudflareService, type AccessRule } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { changeSets, cloudflareAccounts, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const run = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -28,9 +31,7 @@ const sampleRule: AccessRule = {
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, role: "user" },
-  });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
 
   const account = await configService.addAccount({
@@ -47,9 +48,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.changeSet.deleteMany({ where: { ownerId: userId } });
-  await prisma.cloudflareAccount.deleteMany({ where: { id: accountId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await db.delete(changeSets).where(eq(changeSets.ownerId, userId));
+  await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
+  await db.delete(users).where(eq(users.id, userId));
 });
 
 afterEach(() => {
@@ -115,8 +116,8 @@ describe("POST /api/domains/:zoneId/access-rules", () => {
       notes: "bad actor",
     });
 
-    const changeSet = await prisma.changeSet.findFirst({
-      where: { ownerId: userId, zoneId, action: "access_rule.create" },
+    const changeSet = await db.query.changeSets.findFirst({
+      where: and(eq(changeSets.ownerId, userId), eq(changeSets.zoneId, zoneId), eq(changeSets.action, "access_rule.create")),
     });
     expect(changeSet).not.toBeNull();
     expect(changeSet?.reversible).toBe(false);
@@ -207,8 +208,8 @@ describe("DELETE /api/domains/:zoneId/access-rules/:ruleId", () => {
     expect(res.status).toBe(204);
     expect(spy).toHaveBeenCalledWith(expect.anything(), zoneId, "rule-1");
 
-    const changeSet = await prisma.changeSet.findFirst({
-      where: { ownerId: userId, zoneId, action: "access_rule.delete" },
+    const changeSet = await db.query.changeSets.findFirst({
+      where: and(eq(changeSets.ownerId, userId), eq(changeSets.zoneId, zoneId), eq(changeSets.action, "access_rule.delete")),
     });
     expect(changeSet).not.toBeNull();
     expect(changeSet?.reversible).toBe(false);

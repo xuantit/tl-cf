@@ -3,8 +3,11 @@ import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { eq, inArray } from "drizzle-orm";
+
 import { app } from "../src/app.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { sessions, users } from "../src/db/schema.js";
 import { env } from "../src/utils/env.js";
 
 const email = `sessions-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
@@ -36,9 +39,9 @@ async function me(token: string) {
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({ data: { email, passwordHash, role: "user" } });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
-  const other = await prisma.user.create({ data: { email: otherEmail, passwordHash, role: "user" } });
+  const [other] = await db.insert(users).values({ email: otherEmail, passwordHash, role: "user" }).returning();
   otherUserId = other.id;
 
   tokenA = await login(email);
@@ -48,18 +51,18 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Session rows cascade with user delete
-  await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+  await db.delete(users).where(inArray(users.id, [userId, otherUserId]));
 });
 
 describe("login sessions", () => {
   it("login creates a session row and the token works", async () => {
-    const sessions = await prisma.session.findMany({ where: { userId } });
-    expect(sessions).toHaveLength(2);
-    expect(sessions.map((s) => s.jti)).toEqual(
+    const sessionRows = await db.query.sessions.findMany({ where: eq(sessions.userId, userId) });
+    expect(sessionRows).toHaveLength(2);
+    expect(sessionRows.map((s) => s.jti)).toEqual(
       expect.arrayContaining([jtiOf(tokenA), jtiOf(tokenB)]),
     );
-    expect(sessions[0].userAgent).toBe("vitest-agent");
-    expect(sessions[0].ip).toBeTruthy();
+    expect(sessionRows[0].userAgent).toBe("vitest-agent");
+    expect(sessionRows[0].ip).toBeTruthy();
 
     const res = await me(tokenA);
     expect(res.status).toBe(200);
@@ -85,7 +88,7 @@ describe("login sessions", () => {
 
     const currents = res.body.filter((s: { current: boolean }) => s.current);
     expect(currents).toHaveLength(1);
-    const currentSession = await prisma.session.findUnique({ where: { jti: jtiOf(tokenA) } });
+    const currentSession = await db.query.sessions.findFirst({ where: eq(sessions.jti, jtiOf(tokenA)) });
     expect(currents[0].id).toBe(currentSession!.id);
 
     const times = res.body.map((s: { createdAt: string }) => new Date(s.createdAt).getTime());
@@ -93,7 +96,7 @@ describe("login sessions", () => {
   });
 
   it("cannot revoke a session owned by another user (404)", async () => {
-    const foreign = await prisma.session.findUnique({ where: { jti: jtiOf(otherToken) } });
+    const foreign = await db.query.sessions.findFirst({ where: eq(sessions.jti, jtiOf(otherToken)) });
     const res = await request(app)
       .delete(`/api/auth/sessions/${foreign!.id}`)
       .set("Authorization", `Bearer ${tokenA}`);
@@ -104,7 +107,7 @@ describe("login sessions", () => {
   });
 
   it("revoking another own session invalidates that token while current keeps working", async () => {
-    const sessionB = await prisma.session.findUnique({ where: { jti: jtiOf(tokenB) } });
+    const sessionB = await db.query.sessions.findFirst({ where: eq(sessions.jti, jtiOf(tokenB)) });
     const res = await request(app)
       .delete(`/api/auth/sessions/${sessionB!.id}`)
       .set("Authorization", `Bearer ${tokenA}`);

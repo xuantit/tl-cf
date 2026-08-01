@@ -3,6 +3,9 @@ import { z } from "zod";
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(9000),
+  DATABASE_URL: z
+    .string()
+    .default("postgresql://postgres:postgres@localhost:5433/cftool"),
   JWT_SECRET: z.string().min(16).optional().default("default-jwt-secret-change-in-production"),
   ENCRYPTION_KEY: z.string().length(64, "Must be 64 hex characters (32 bytes)"),
   AUTO_SEED_DEFAULT_ADMIN: z

@@ -2,12 +2,15 @@ import request from "supertest";
 import bcrypt from "bcryptjs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { and, eq, inArray } from "drizzle-orm";
+
 import { app } from "../src/app.js";
 import { clearDashboardCache } from "../src/routes/dashboard.js";
 import { cloudflareService, type Zone } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
 import { matchTagRules } from "../src/services/tags.js";
-import { prisma } from "../src/services/db.js";
+import { db } from "../src/services/db.js";
+import { cloudflareAccounts, domains, tagRules, tags, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const run = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -25,9 +28,7 @@ let domainBId: string;
 
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, role: "user" },
-  });
+  const [user] = await db.insert(users).values({ email, passwordHash, role: "user" }).returning();
   userId = user.id;
 
   const account = await configService.addAccount({
@@ -38,34 +39,34 @@ beforeAll(async () => {
   });
   accountId = account.id;
 
-  const domainA = await prisma.domain.create({
-    data: {
+  const [domainA] = await db
+    .insert(domains)
+    .values({
       accountId,
       name: "a.com",
       zoneId: zoneAId,
       status: "active",
       settingsJson: JSON.stringify({ sslMode: "full", tags: ["prod", "eu"] }),
-    },
-  });
-  const domainB = await prisma.domain.create({
-    data: {
+    })
+    .returning();
+  const [domainB] = await db
+    .insert(domains)
+    .values({
       accountId,
       name: "b.com",
       zoneId: zoneBId,
       status: "active",
       settingsJson: JSON.stringify({ tags: ["prod"] }),
-    },
-  });
+    })
+    .returning();
   domainAId = domainA.id;
   domainBId = domainB.id;
 
   // Metadata: one for an in-use tag, one orphan (no domains)
-  await prisma.tag.createMany({
-    data: [
-      { userId, name: "prod", description: "Production zones" },
-      { userId, name: "archived", description: "No domains yet" },
-    ],
-  });
+  await db.insert(tags).values([
+    { userId, name: "prod", description: "Production zones" },
+    { userId, name: "archived", description: "No domains yet" },
+  ]);
 
   const res = await request(app).post("/api/auth/login").send({ email, password });
   expect(res.status).toBe(200);
@@ -73,10 +74,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.tagRule.deleteMany({ where: { userId } });
-  await prisma.tag.deleteMany({ where: { userId } });
-  await prisma.cloudflareAccount.deleteMany({ where: { id: accountId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await db.delete(tagRules).where(eq(tagRules.userId, userId));
+  await db.delete(tags).where(eq(tags.userId, userId));
+  await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
+  await db.delete(users).where(eq(users.id, userId));
 });
 
 beforeEach(() => {
@@ -88,8 +89,8 @@ afterEach(() => {
 });
 
 async function getTags(domainId: string): Promise<string[]> {
-  const domain = await prisma.domain.findUniqueOrThrow({ where: { id: domainId } });
-  return JSON.parse(domain.settingsJson ?? "{}").tags ?? [];
+  const domain = await db.query.domains.findFirst({ where: eq(domains.id, domainId) });
+  return JSON.parse(domain!.settingsJson ?? "{}").tags ?? [];
 }
 
 describe("matchTagRules (pure)", () => {
@@ -179,18 +180,18 @@ describe("/api/tags", () => {
     expect(await getTags(domainAId)).toEqual(["production", "eu"]);
     expect(await getTags(domainBId)).toEqual(["production"]);
 
-    const meta = await prisma.tag.findUnique({
-      where: { userId_name: { userId, name: "production" } },
+    const meta = await db.query.tags.findFirst({
+      where: and(eq(tags.userId, userId), eq(tags.name, "production")),
     });
     expect(meta?.description).toBe("Production zones");
-    const oldMeta = await prisma.tag.findUnique({
-      where: { userId_name: { userId, name: "prod" } },
+    const oldMeta = await db.query.tags.findFirst({
+      where: and(eq(tags.userId, userId), eq(tags.name, "prod")),
     });
-    expect(oldMeta).toBeNull();
+    expect(oldMeta).toBeUndefined();
 
     // Other settings fields must survive the rewrite
-    const domainA = await prisma.domain.findUniqueOrThrow({ where: { id: domainAId } });
-    expect(JSON.parse(domainA.settingsJson!).sslMode).toBe("full");
+    const domainA = await db.query.domains.findFirst({ where: eq(domains.id, domainAId) });
+    expect(JSON.parse(domainA!.settingsJson!).sslMode).toBe("full");
   });
 
   it("deletes a tag from all domains and removes metadata", async () => {

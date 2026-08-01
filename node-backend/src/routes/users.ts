@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
+import { and, asc, count, eq, ne } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { bulkJobs, users } from "../db/schema.js";
 import logger from "../utils/logger.js";
 
 export const usersRouter = Router();
@@ -20,33 +22,32 @@ usersRouter.use((req, res, next) => {
 
 /** Đếm số admin đang active, trừ user chỉ định (để chặn khoá/xoá admin cuối cùng) */
 async function otherActiveAdminCount(excludeUserId: string): Promise<number> {
-  return prisma.user.count({
-    where: { role: "admin", isActive: true, id: { not: excludeUserId } },
-  });
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.isActive, true), ne(users.id, excludeUserId)));
+  return value;
 }
 
 // GET /api/users — danh sách user kèm thống kê
 usersRouter.get("/", async (_req, res) => {
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      isActive: true,
-      createdAt: true,
-      _count: { select: { cfAccounts: true, dnsTemplates: true } },
+  const rows = await db.query.users.findMany({
+    orderBy: asc(users.createdAt),
+    columns: { id: true, email: true, role: true, isActive: true, createdAt: true },
+    with: {
+      cfAccounts: { columns: { id: true } },
+      dnsTemplates: { columns: { id: true } },
     },
   });
   res.json(
-    users.map((u) => ({
+    rows.map((u) => ({
       id: u.id,
       email: u.email,
       role: u.role,
       isActive: u.isActive,
       createdAt: u.createdAt,
-      cfAccountCount: u._count.cfAccounts,
-      templateCount: u._count.dnsTemplates,
+      cfAccountCount: u.cfAccounts.length,
+      templateCount: u.dnsTemplates.length,
     })),
   );
 });
@@ -60,7 +61,7 @@ usersRouter.patch("/:id", async (req, res) => {
   });
   const body = bodySchema.parse(req.body ?? {});
 
-  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  const target = await db.query.users.findFirst({ where: eq(users.id, req.params.id) });
   if (!target) return res.status(404).json({ detail: "User not found" });
 
   if (target.id === auth.userId && (body.isActive === false || body.role === "user")) {
@@ -76,14 +77,14 @@ usersRouter.patch("/:id", async (req, res) => {
     return res.status(400).json({ detail: "Không thể khoá/hạ quyền admin cuối cùng" });
   }
 
-  const updated = await prisma.user.update({
-    where: { id: target.id },
-    data: {
+  const [updated] = await db
+    .update(users)
+    .set({
       ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
       ...(body.role !== undefined ? { role: body.role } : {}),
-    },
-    select: { id: true, email: true, role: true, isActive: true },
-  });
+    })
+    .where(eq(users.id, target.id))
+    .returning({ id: users.id, email: users.email, role: users.role, isActive: users.isActive });
 
   logger.info("User updated by admin", { targetId: target.id, changes: body, adminId: auth.userId });
   res.json(updated);
@@ -93,7 +94,7 @@ usersRouter.patch("/:id", async (req, res) => {
 usersRouter.delete("/:id", async (req, res) => {
   const auth = req.auth as AuthUser;
 
-  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  const target = await db.query.users.findFirst({ where: eq(users.id, req.params.id) });
   if (!target) return res.status(404).json({ detail: "User not found" });
 
   if (target.id === auth.userId) {
@@ -103,10 +104,10 @@ usersRouter.delete("/:id", async (req, res) => {
     return res.status(400).json({ detail: "Không thể xoá admin cuối cùng" });
   }
 
-  await prisma.$transaction([
-    prisma.bulkJob.deleteMany({ where: { ownerId: target.id } }),
-    prisma.user.delete({ where: { id: target.id } }), // cascade: cfAccounts → domains, dnsTemplates
-  ]);
+  await db.transaction(async (tx) => {
+    await tx.delete(bulkJobs).where(eq(bulkJobs.ownerId, target.id));
+    await tx.delete(users).where(eq(users.id, target.id)); // cascade: cfAccounts → domains, dnsTemplates
+  });
 
   logger.info("User deleted by admin", { targetId: target.id, email: target.email, adminId: auth.userId });
   res.json({ ok: true });

@@ -1,4 +1,7 @@
-import { prisma } from "./db.js";
+import { and, desc, eq } from "drizzle-orm";
+
+import { db } from "./db.js";
+import { changeItems, changeSets, type ChangeItemRow, type ChangeSetRow } from "../db/schema.js";
 
 export type ChangeItemPayload = {
   resourceType: string;
@@ -31,7 +34,9 @@ function parseJson<T>(value: string | null | undefined): T | null {
   }
 }
 
-function mapChangeSet(record: any) {
+type ChangeSetWithItems = ChangeSetRow & { items?: ChangeItemRow[] };
+
+function mapChangeSet(record: ChangeSetWithItems) {
   return {
     id: record.id,
     ownerId: record.ownerId,
@@ -44,7 +49,7 @@ function mapChangeSet(record: any) {
     meta: parseJson(record.metaJson),
     createdAt: record.createdAt,
     finishedAt: record.finishedAt,
-    items: (record.items || []).map((item: any) => ({
+    items: (record.items || []).map((item) => ({
       id: item.id,
       resourceType: item.resourceType,
       resourceId: item.resourceId,
@@ -58,74 +63,85 @@ function mapChangeSet(record: any) {
 }
 
 export async function createChangeSet(payload: CreateChangeSetPayload) {
-  const created = await prisma.changeSet.create({
-    data: {
-      ownerId: payload.ownerId,
-      accountId: payload.accountId,
-      zoneId: payload.zoneId,
-      action: payload.action,
-      status: payload.status ?? "done",
-      reversible: payload.reversible ?? false,
-      jobId: payload.jobId,
-      metaJson: payload.meta ? JSON.stringify(payload.meta) : null,
-      finishedAt: payload.finishedAt ?? null,
-      items: payload.items?.length
-        ? {
-            create: payload.items.map((item) => ({
-              resourceType: item.resourceType,
-              resourceId: item.resourceId,
-              beforeJson: item.before !== undefined ? JSON.stringify(item.before) : null,
-              afterJson: item.after !== undefined ? JSON.stringify(item.after) : null,
-              status: item.status ?? "done",
-              error: item.error ?? null,
-            })),
-          }
-        : undefined,
-    },
-    include: { items: true },
+  return db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(changeSets)
+      .values({
+        ownerId: payload.ownerId,
+        accountId: payload.accountId,
+        zoneId: payload.zoneId,
+        action: payload.action,
+        status: payload.status ?? "done",
+        reversible: payload.reversible ?? false,
+        jobId: payload.jobId,
+        metaJson: payload.meta ? JSON.stringify(payload.meta) : null,
+        finishedAt: payload.finishedAt ?? null,
+      })
+      .returning();
+
+    let items: ChangeItemRow[] = [];
+    if (payload.items?.length) {
+      items = await tx
+        .insert(changeItems)
+        .values(
+          payload.items.map((item) => ({
+            changeSetId: created.id,
+            resourceType: item.resourceType,
+            resourceId: item.resourceId,
+            beforeJson: item.before !== undefined ? JSON.stringify(item.before) : null,
+            afterJson: item.after !== undefined ? JSON.stringify(item.after) : null,
+            status: item.status ?? "done",
+            error: item.error ?? null,
+          }))
+        )
+        .returning();
+    }
+    return mapChangeSet({ ...created, items });
   });
-  return mapChangeSet(created);
 }
 
 export async function listChangeSets(ownerId: string, params: { limit?: number; accountId?: string; zoneId?: string; action?: string }) {
   const take = Math.min(Math.max(params.limit ?? 50, 1), 200);
-  const records = await prisma.changeSet.findMany({
-    where: {
-      ownerId,
-      accountId: params.accountId,
-      zoneId: params.zoneId,
-      action: params.action,
-    },
-    orderBy: { createdAt: "desc" },
-    take,
-    include: { items: true },
+  const conditions = [eq(changeSets.ownerId, ownerId)];
+  if (params.accountId !== undefined) conditions.push(eq(changeSets.accountId, params.accountId));
+  if (params.zoneId !== undefined) conditions.push(eq(changeSets.zoneId, params.zoneId));
+  if (params.action !== undefined) conditions.push(eq(changeSets.action, params.action));
+
+  const records = await db.query.changeSets.findMany({
+    where: and(...conditions),
+    orderBy: desc(changeSets.createdAt),
+    limit: take,
+    with: { items: true },
   });
   return records.map(mapChangeSet);
 }
 
 export async function getChangeSetById(id: string) {
-  const record = await prisma.changeSet.findUnique({
-    where: { id },
-    include: { items: true },
+  const record = await db.query.changeSets.findFirst({
+    where: eq(changeSets.id, id),
+    with: { items: true },
   });
   if (!record) return null;
   return mapChangeSet(record);
 }
 
 export async function markChangeSetStatus(changeSetId: string, status: string) {
-  const updated = await prisma.changeSet.update({
-    where: { id: changeSetId },
-    data: { status },
-    include: { items: true },
+  const [updated] = await db
+    .update(changeSets)
+    .set({ status })
+    .where(eq(changeSets.id, changeSetId))
+    .returning();
+  const items = await db.query.changeItems.findMany({
+    where: eq(changeItems.changeSetId, changeSetId),
   });
-  return mapChangeSet(updated);
+  return mapChangeSet({ ...updated, items });
 }
 
 export async function getRollbackPreview(changeSetId: string, ownerId: string) {
   const changeSet = await getChangeSetById(changeSetId);
   if (!changeSet || changeSet.ownerId !== ownerId) return null;
 
-  const operations = changeSet.items.map((item: any) => ({
+  const operations = changeSet.items.map((item) => ({
     resourceType: item.resourceType,
     resourceId: item.resourceId,
     action: item.before ? "restore" : "delete_created",

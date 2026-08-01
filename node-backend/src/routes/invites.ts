@@ -2,9 +2,11 @@ import { randomBytes } from "crypto";
 
 import { Router } from "express";
 import { z } from "zod";
+import { desc, eq } from "drizzle-orm";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
-import { prisma } from "../services/db.js";
+import { db } from "../services/db.js";
+import { inviteCodes } from "../db/schema.js";
 import logger from "../utils/logger.js";
 
 export const invitesRouter = Router();
@@ -31,7 +33,7 @@ function generateCode(): string {
 
 // GET /api/invites — danh sách invite codes
 invitesRouter.get("/", async (_req, res) => {
-  const invites = await prisma.inviteCode.findMany({ orderBy: { createdAt: "desc" } });
+  const invites = await db.query.inviteCodes.findMany({ orderBy: desc(inviteCodes.createdAt) });
   res.json(
     invites.map((i) => ({
       id: i.id,
@@ -56,15 +58,16 @@ invitesRouter.post("/", async (req, res) => {
   });
   const body = bodySchema.parse(req.body ?? {});
 
-  const invite = await prisma.inviteCode.create({
-    data: {
+  const [invite] = await db
+    .insert(inviteCodes)
+    .values({
       code: generateCode(),
       note: body.note,
       maxUses: body.maxUses,
       expiresAt: body.expiresAt,
       createdBy: auth.userId,
-    },
-  });
+    })
+    .returning();
 
   logger.info("Invite code created", { inviteId: invite.id, createdBy: auth.userId });
   res.status(201).json({
@@ -80,10 +83,10 @@ invitesRouter.post("/", async (req, res) => {
 
 // DELETE /api/invites/:id — thu hồi invite code
 invitesRouter.delete("/:id", async (req, res) => {
-  const existing = await prisma.inviteCode.findUnique({ where: { id: req.params.id } });
+  const existing = await db.query.inviteCodes.findFirst({ where: eq(inviteCodes.id, req.params.id) });
   if (!existing) return res.status(404).json({ detail: "Invite code not found" });
 
-  await prisma.inviteCode.delete({ where: { id: req.params.id } });
+  await db.delete(inviteCodes).where(eq(inviteCodes.id, req.params.id));
   logger.info("Invite code deleted", { inviteId: req.params.id });
   res.json({ ok: true });
 });
