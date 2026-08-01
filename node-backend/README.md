@@ -1,6 +1,40 @@
 # Node.js Backend - Cloudflare Automation Tool
 
-Backend được viết bằng Node.js + Express + MySQL (raw SQL với mysql2).
+Backend được viết bằng Node.js + Express + PostgreSQL (Drizzle ORM).
+
+## Database (Postgres + Drizzle)
+
+Quy trình chuẩn để có DB sẵn sàng test:
+
+```bash
+cp .env.example .env          # điền DATABASE_URL, ENCRYPTION_KEY (64 hex)...
+npm install
+
+npm run db:setup              # chạy migrations + seed (admin/demo/dữ liệu mẫu)
+npm run db:check              # kiểm tra kết nối + đủ 12 bảng
+```
+
+Các script DB:
+
+| Script | Mô tả |
+| --- | --- |
+| `npm run db:generate` | Sinh migration SQL từ `src/db/schema.ts` |
+| `npm run db:migrate` | Áp dụng migrations trong `drizzle/*.sql` |
+| `npm run db:push` | Đẩy schema trực tiếp (dev nhanh, không tạo file migration) |
+| `npm run db:check` | Kiểm tra kết nối + liệt kê bảng còn thiếu |
+| `npm run db:seed` | Seed idempotent: admin, demo user, DNS template, tag rule, (tuỳ chọn) CF account |
+| `npm run db:reset -- --yes` | **Xoá toàn bộ dữ liệu** (giữ schema) rồi để seed lại |
+| `npm run db:setup` | `db:migrate` + `db:seed` |
+
+Tài khoản mặc định sau khi seed:
+- Admin: `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` (mặc định `admin@example.com` / `Admin@123`)
+- Demo: `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` (mặc định `demo@example.com` / `Demo@1234`)
+
+Để seed sẵn một Cloudflare account, đặt `SEED_CF_API_TOKEN` (hoặc bộ
+`SEED_CF_AUTH_TYPE=globalApiKey` + `SEED_CF_EMAIL` + `SEED_CF_GLOBAL_API_KEY`) trong `.env`.
+
+> Lưu ý: `DATABASE_URL` là URL Postgres thuần — **không** chứa `https://` trong host.
+> Với Supabase pooler: `postgresql://USER:PASS@aws-0-<region>.pooler.supabase.com:6543/postgres`.
 
 ## Setup
 

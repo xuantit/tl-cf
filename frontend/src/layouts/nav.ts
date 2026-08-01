@@ -21,6 +21,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { path: '/accounts', icon: '⌂', label: 'Accounts', section: 'account' },
   { path: '/settings', icon: '⚙', label: 'Settings', section: 'account' },
   { path: '/users', icon: '◉', label: 'Users', adminOnly: true },
+  { path: '/invites', icon: '✉', label: 'Invite codes', adminOnly: true },
   { path: '/audit', icon: '✎', label: 'Audit log', adminOnly: true },
 ]
 

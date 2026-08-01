@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Popconfirm, Select, Table, message } from 'antd'
+import { Button, Popconfirm, Select, Table } from 'antd'
+import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'

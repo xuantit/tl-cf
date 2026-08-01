@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { message } from 'antd'
+import { message } from '../lib/antdApp'
 import { isAxiosError } from 'axios'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'

@@ -12,6 +12,14 @@ import './index.css'
 import App from './App.tsx'
 import { useThemeStore } from './stores/useThemeStore'
 import { useUiPrefStore } from './stores/useUiPrefStore'
+import { setAntdApp } from './lib/antdApp'
+
+// Binds context-aware message/modal/notification instances so they follow the
+// dynamic theme (and avoid antd's "Static function can not consume context" warning).
+function AntdAppBridge() {
+  setAntdApp(AntApp.useApp())
+  return null
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,6 +101,7 @@ export function ThemedApp() {
       }}
     >
       <AntApp>
+        <AntdAppBridge />
         <App />
       </AntApp>
     </ConfigProvider>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Dropdown, Table, message } from 'antd'
+import { Dropdown, Table } from 'antd'
+import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
 import { useSearchParams } from 'react-router-dom'

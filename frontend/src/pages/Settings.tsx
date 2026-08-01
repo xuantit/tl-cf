@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Popconfirm, Segmented, Select, Switch, message } from 'antd'
+import { Button, Input, Popconfirm, Segmented, Select, Switch } from 'antd'
+import { message } from '../lib/antdApp'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../services/api'

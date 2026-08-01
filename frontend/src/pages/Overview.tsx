@@ -121,7 +121,7 @@ export default function Overview() {
         <Banner
           tone="err"
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }
@@ -197,7 +197,7 @@ export default function Overview() {
           </div>
 
           {/* grid-3 panes */}
-          <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-3">
+          <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-3 md:gap-x-10">
             {showPlanPane && (
               <div className="border-b border-stroke p-[13px_16px] md:border-b-0">
                 <Lbl className="mb-[9px] block">{t('Plan distribution')}</Lbl>
@@ -214,7 +214,7 @@ export default function Overview() {
                 ))}
               </div>
             )}
-            <div className="border-b border-stroke p-[13px_16px] md:border-b-0 md:border-l md:border-solid md:border-l-stroke md:first:border-l-0">
+            <div className="border-b border-stroke p-[13px_16px] md:border-b-0">
               <Lbl className="mb-[9px] block">{t('Needs attention')}</Lbl>
               <KvRow
                 k={
@@ -251,7 +251,7 @@ export default function Overview() {
                 />
               )}
             </div>
-            <div className="p-[13px_16px] md:border-l md:border-solid md:border-l-stroke">
+            <div className="p-[13px_16px]">
               <Lbl className="mb-[9px] block">{t('CF accounts')}</Lbl>
               {summary.accounts.map((acc) => (
                 <KvRow

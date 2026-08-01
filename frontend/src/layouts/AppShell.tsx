@@ -36,16 +36,16 @@ function SideNavItem({
   return (
     <Link
       to={to}
-      className={`flex h-[26px] items-center gap-2 rounded-[6px] px-[7px] text-[13px] transition-colors ${
+      className={`flex h-[32px] items-center gap-[9px] rounded-[6px] px-[9px] text-[14px] transition-colors ${
         active
           ? 'bg-accent-soft font-medium !text-accent'
           : '!text-fg-2 hover:bg-bg-hover hover:!text-fg'
       }`}
     >
-      <span className="w-[14px] text-center text-[12px] opacity-90">{icon}</span>
+      <span className="w-[18px] text-center text-[15px] opacity-90">{icon}</span>
       <span className="truncate">{label}</span>
       {count !== undefined && (
-        <span className={`ml-auto font-mono text-[11px] ${active ? 'text-accent opacity-75' : 'text-fg-3'}`}>
+        <span className={`ml-auto font-mono text-[12px] ${active ? 'text-accent opacity-75' : 'text-fg-3'}`}>
           {count}
         </span>
       )}
@@ -92,7 +92,7 @@ function MobileNavButton({
   )
 }
 
-/** Console-style app shell: 150px sidebar (desktop) + bottom nav (mobile) + ⌘K palette. */
+/** Console-style app shell: 264px sidebar (desktop) + bottom nav (mobile) + ⌘K palette. */
 export default function AppShell() {
   const { t, i18n } = useTranslation()
   const location = useLocation()
@@ -187,13 +187,13 @@ export default function AppShell() {
   return (
     <div className="flex h-dvh bg-bg">
       {/* Desktop sidebar (.side) */}
-      <aside className="hidden w-[150px] shrink-0 flex-col border-r border-stroke bg-bg-side px-[7px] py-[9px] lg:flex">
+      <aside className="hidden w-[264px] shrink-0 flex-col border-r border-stroke bg-bg-side px-[11px] py-[11px] lg:flex">
         {/* Brand */}
         <Link to="/" className="flex items-center gap-[7px] px-[5px] pt-[3px] pb-[7px]">
-          <span className="grid h-[19px] w-[19px] shrink-0 place-items-center rounded-[5px] bg-accent text-[11px] text-white">
+          <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-[5px] bg-accent text-[12px] text-white">
             ☁
           </span>
-          <span className="font-mono text-[13px] font-semibold tracking-[-0.01em] !text-fg">CF Tool</span>
+          <span className="font-mono text-[14px] font-semibold tracking-[-0.01em] !text-fg">CF Tool</span>
           <span className="ml-auto font-mono text-[11px] text-fg-3">v2</span>
         </Link>
 
@@ -206,7 +206,7 @@ export default function AppShell() {
         <button
           type="button"
           onClick={() => openPalette(true)}
-          className="mb-[9px] flex h-[26px] w-full cursor-pointer items-center gap-1.5 rounded-[6px] border border-solid border-stroke bg-bg px-[7px] font-mono text-[11px] text-fg-3 transition-colors hover:border-fg-3"
+          className="mb-[9px] flex h-[30px] w-full cursor-pointer items-center gap-1.5 rounded-[6px] border border-solid border-stroke bg-bg px-[9px] font-mono text-[12px] text-fg-3 transition-colors hover:border-fg-3"
         >
           <span>⌕</span>
           <span>{t('Quick find')}</span>
@@ -257,10 +257,10 @@ export default function AppShell() {
             type="button"
             className="mt-auto flex w-full cursor-pointer items-center gap-[7px] border-x-0 border-t border-b-0 border-solid border-stroke bg-transparent px-[5px] pt-[7px] pb-[2px] text-left"
           >
-            <span className="grid h-[19px] w-[19px] shrink-0 place-items-center rounded-[4px] bg-fg font-mono text-[9px] font-semibold text-bg">
+            <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-[4px] bg-fg font-mono text-[10px] font-semibold text-bg">
               {initials}
             </span>
-            <span className="truncate font-mono text-[11.5px] text-fg-2">{email}</span>
+            <span className="truncate font-mono text-[12px] text-fg-2">{email}</span>
           </button>
         </Dropdown>
       </aside>

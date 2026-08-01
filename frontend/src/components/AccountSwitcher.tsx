@@ -21,19 +21,25 @@ export default function AccountSwitcher() {
   const activeAccountId = useAccountStore((s) => s.activeAccountId)
   const setActiveAccountId = useAccountStore((s) => s.setActiveAccountId)
 
-  const { data: accounts = [], isLoading } = useQuery<CfAccount[]>({
+  const { data: accounts = [], isLoading, isSuccess } = useQuery<CfAccount[]>({
     queryKey: ['cf-accounts'],
     queryFn: async () => (await api.get('/cf/accounts')).data,
   })
 
-  // Auto-select first account when none is selected or the selected one no longer exists.
+  // Keep the selected account in sync with the fetched list:
+  // - clear a stale id (e.g. persisted in localStorage) once we know the list is empty
+  // - auto-select the first account when none is selected or the selected one is gone
   useEffect(() => {
-    if (accounts.length === 0) return
+    if (!isSuccess) return
+    if (accounts.length === 0) {
+      if (activeAccountId) setActiveAccountId(null)
+      return
+    }
     const exists = accounts.some((a) => a.id === activeAccountId)
     if (!activeAccountId || !exists) {
       setActiveAccountId(accounts[0].id)
     }
-  }, [accounts, activeAccountId, setActiveAccountId])
+  }, [isSuccess, accounts, activeAccountId, setActiveAccountId])
 
   const handleChange = (id: string) => {
     setActiveAccountId(id)

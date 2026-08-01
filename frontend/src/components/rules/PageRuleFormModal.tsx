@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Alert, Button, Divider, Form, Input, InputNumber, Modal, Select, Space, Typography, message } from 'antd'
+import { Alert, Button, Divider, Form, Input, InputNumber, Modal, Select, Space, Typography } from 'antd'
+import { message } from '../../lib/antdApp'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { PAGE_RULE_PRESETS, type PageRuleInput } from './pageRulePresets'

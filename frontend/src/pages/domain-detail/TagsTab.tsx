@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, message } from 'antd'
+import { Button, Input } from 'antd'
+import { message } from '../../lib/antdApp'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import ConfirmDestructive from '../../components/ConfirmDestructive'

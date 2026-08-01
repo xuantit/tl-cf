@@ -1,5 +1,7 @@
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, message } from 'antd'
+import { Button } from 'antd'
+import { message } from '../../lib/antdApp'
 import { CopyOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -61,9 +63,14 @@ export default function OverviewTab({ zoneId, zone }: { zoneId: string; zone?: Z
     staleTime: 60_000,
   })
 
+  const forceFreshCaps = useRef(false)
   const capabilities = useQuery<CapabilitiesResponse>({
     queryKey: ['capabilities', zoneId],
-    queryFn: async () => (await api.get('/cf/capabilities', { params: { zoneId } })).data,
+    queryFn: async () => {
+      const refresh = forceFreshCaps.current
+      forceFreshCaps.current = false
+      return (await api.get('/cf/capabilities', { params: { zoneId, ...(refresh ? { refresh: 1 } : {}) } })).data
+    },
     enabled: !!zoneId,
   })
 
@@ -174,7 +181,7 @@ export default function OverviewTab({ zoneId, zone }: { zoneId: string; zone?: Z
               size="small"
               className="ml-auto"
               loading={capabilities.isFetching}
-              onClick={() => capabilities.refetch()}
+              onClick={() => { forceFreshCaps.current = true; capabilities.refetch() }}
             >
               ↻ {t('Re-check')}
             </Button>

@@ -11,8 +11,8 @@ import {
   DatePicker,
   Popconfirm,
   Tooltip,
-  message,
 } from 'antd'
+import { message, modal } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import type { Dayjs } from 'dayjs'
@@ -84,7 +84,7 @@ export default function Invites() {
       queryClient.invalidateQueries({ queryKey: ['invites'] })
       setAddOpen(false)
       form.resetFields()
-      Modal.success({
+      modal.success({
         title: t('Invite code created'),
         content: (
           <Space orientation="vertical" style={{ width: '100%' }}>

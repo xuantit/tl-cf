@@ -17,8 +17,8 @@ import {
   Radio,
   Tag,
   Alert,
-  message,
 } from 'antd'
+import { message } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
 import {
@@ -89,7 +89,7 @@ export default function Templates() {
     )
   }
 
-  const { data: templates = [], isLoading, isError, error, refetch } = useQuery<DnsTemplate[]>({
+  const { data: templates = [], isLoading, isError, error, refetch, isFetching } = useQuery<DnsTemplate[]>({
     queryKey: ['templates'],
     queryFn: async () => (await api.get('/templates')).data,
   })
@@ -278,7 +278,7 @@ export default function Templates() {
           tone="err"
           className="mt-3"
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }

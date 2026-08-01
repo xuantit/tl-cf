@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Dropdown, Modal, Table, message } from 'antd'
+import { Button, Dropdown, Table } from 'antd'
+import { message, modal } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../services/api'
@@ -63,7 +64,7 @@ export default function Users() {
   const adminCount = users.filter((u) => u.role === 'admin').length
 
   const confirmLock = (u: AdminUser) => {
-    Modal.confirm({
+    modal.confirm({
       title: u.isActive ? t('Lock this user?') : t('Unlock this user?'),
       content: u.isActive ? t('The user will be logged out and unable to sign in.') : undefined,
       okText: u.isActive ? t('Lock') : t('Unlock'),
@@ -183,7 +184,7 @@ export default function Users() {
           tone="err"
           className="mb-3"
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }

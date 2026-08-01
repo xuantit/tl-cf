@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Button, Form, Input, Modal, message, Segmented, Alert, Typography, Dropdown } from 'antd'
+import { Table, Button, Form, Input, Modal, Segmented, Alert, Typography, Dropdown } from 'antd'
+import { message, modal } from '../lib/antdApp'
 import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
@@ -52,10 +53,18 @@ function CapabilitiesSection({ accountId }: { accountId: string }) {
   })
   const zoneId = zones[0]?.id
 
+  const forceFresh = useRef(false)
   const { data: caps, isLoading, isError, refetch, isFetching } = useQuery<Capabilities>({
     queryKey: ['cf-capabilities', accountId, zoneId],
-    queryFn: async () =>
-      (await api.get('/cf/capabilities', { params: { accountId, ...(zoneId ? { zoneId } : {}) } })).data,
+    queryFn: async () => {
+      const refresh = forceFresh.current
+      forceFresh.current = false
+      return (
+        await api.get('/cf/capabilities', {
+          params: { accountId, ...(zoneId ? { zoneId } : {}), ...(refresh ? { refresh: 1 } : {}) },
+        })
+      ).data
+    },
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -72,7 +81,7 @@ function CapabilitiesSection({ accountId }: { accountId: string }) {
             : t('Token permissions')
         }
         actions={
-          <Button size="small" type="text" loading={isFetching} onClick={() => refetch()}>
+          <Button size="small" type="text" loading={isFetching} onClick={() => { forceFresh.current = true; refetch() }}>
             ↻ {t('Re-check')}
           </Button>
         }
@@ -89,9 +98,9 @@ function CapabilitiesSection({ accountId }: { accountId: string }) {
           {t('Could not evaluate token permissions')}
         </div>
       ) : (
-        <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-2">
+        <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-2 md:gap-x-10">
           {[entries.slice(0, half), entries.slice(half)].map((group, gi) => (
-            <div key={gi} className={`p-[13px_16px] ${gi === 1 ? 'md:border-l md:border-solid md:border-l-stroke' : ''}`}>
+            <div key={gi} className="px-4 py-[7px]">
               {group.map(([name, f]) => (
                 <KvRow
                   key={name}
@@ -207,7 +216,7 @@ export default function Accounts() {
   })
 
   const confirmDelete = (acc: Account) => {
-    Modal.confirm({
+    modal.confirm({
       title: t('Delete this account?'),
       content: t('Locally saved settings of its domains are removed too.'),
       okText: t('Delete'),

@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Form, Input, Modal, Progress, Select, Switch, message } from 'antd'
+import { Button, Empty, Form, Input, Modal, Progress, Select, Switch } from 'antd'
+import { message } from '../../lib/antdApp'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../../services/api'
 import { useJobPolling, type BulkJobItem } from '../../hooks/useJobPolling'

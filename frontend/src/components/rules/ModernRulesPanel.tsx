@@ -12,8 +12,8 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
 } from 'antd'
+import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'

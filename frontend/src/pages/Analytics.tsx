@@ -31,7 +31,7 @@ export default function Analytics() {
     ? (rangeParam as AnalyticsRange)
     : '24h'
 
-  const { data, isLoading, isError, error, refetch } = useQuery<AnalyticsSummary>({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<AnalyticsSummary>({
     queryKey: ['analytics-summary', activeAccountId, range],
     queryFn: async () => (await api.get('/analytics/summary', { params: { range } })).data,
     retry: false,
@@ -75,7 +75,7 @@ export default function Analytics() {
             </>
           }
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }
@@ -96,7 +96,7 @@ export default function Analytics() {
         <Banner
           tone="err"
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }

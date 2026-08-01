@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Modal, Select, Space, Table, Typography, message } from 'antd'
+import { Alert, Button, Input, Modal, Select, Space, Table, Typography } from 'antd'
+import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../../services/api'

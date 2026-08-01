@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Form, Input, Modal, Popconfirm, Select, Table, message } from 'antd'
+import { Button, Form, Input, Modal, Popconfirm, Select, Table } from 'antd'
+import { message } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'

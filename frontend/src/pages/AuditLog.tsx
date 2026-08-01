@@ -181,7 +181,7 @@ export default function AuditLog() {
           tone="err"
           className="mb-3"
           actions={
-            <Button size="small" onClick={() => refetch()}>
+            <Button size="small" loading={isFetching} onClick={() => refetch()}>
               ↻ {t('Retry')}
             </Button>
           }

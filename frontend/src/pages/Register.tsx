@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
-import { Form, Input, Button, Alert, message } from 'antd'
+import { Form, Input, Button, Alert } from 'antd'
+import { message } from '../lib/antdApp'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { StrengthMeter, Tag } from '../components/ui'

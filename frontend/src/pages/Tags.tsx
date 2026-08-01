@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AutoComplete, Button, Dropdown, Form, Input, Modal, Select, Switch, Table, message } from 'antd'
+import { AutoComplete, Button, Dropdown, Form, Input, Modal, Select, Switch, Table } from 'antd'
+import { message } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
