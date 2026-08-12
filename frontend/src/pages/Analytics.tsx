@@ -153,7 +153,7 @@ export default function Analytics() {
                 />
               ))}
             </div>
-            <div className="border-b border-stroke p-[13px_16px] md:border-b-0 md:border-l md:border-solid md:border-l-stroke">
+            <div className="border-b border-stroke p-[13px_16px] md:border-b-0 md:border-l md:border-l-stroke">
               <Lbl className="mb-[9px] block">{t('Status codes')}</Lbl>
               {STATUS_ROWS.map(({ key, dot, tag }) => (
                 <KvRow
@@ -172,7 +172,7 @@ export default function Analytics() {
                 />
               ))}
             </div>
-            <div className="p-[13px_16px] md:border-l md:border-solid md:border-l-stroke">
+            <div className="p-[13px_16px] md:border-l md:border-l-stroke">
               <Lbl className="mb-[9px] block">{t('Countries')}</Lbl>
               {data.topCountries.length === 0 && <div className="py-2 font-mono text-[11px] text-fg-3">—</div>}
               {data.topCountries.map((row) => (

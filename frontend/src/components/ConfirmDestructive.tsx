@@ -22,6 +22,13 @@ export interface ConfirmDestructiveProps {
   confirmText: string
   /** Confirm button label — defaults to t('Delete permanently'). */
   confirmLabel?: ReactNode
+  /**
+   * Danger tier (Cloudflare-style):
+   * - 'high' (default): irreversible, wide impact (delete zone/user) — requires type-to-confirm.
+   * - 'medium': destructive but scoped/recoverable (purge cache, delete DNS record, delete tag)
+   *   — warning modal only, no typing required.
+   */
+  severity?: 'high' | 'medium'
   loading?: boolean
   onConfirm: () => void
   onCancel: () => void
@@ -40,6 +47,7 @@ export default function ConfirmDestructive({
   explanation,
   confirmText,
   confirmLabel,
+  severity = 'high',
   loading,
   onConfirm,
   onCancel,
@@ -59,9 +67,11 @@ export default function ConfirmDestructive({
           </span>
           <span>
             <span className="block text-[14px] leading-tight font-semibold">{title}</span>
-            <span className="mt-[2px] block font-mono text-[11.5px] font-normal text-fg-3">
-              {t('This cannot be undone')}
-            </span>
+            {severity === 'high' && (
+              <span className="mt-[2px] block font-mono text-[11.5px] font-normal text-fg-3">
+                {t('This cannot be undone')}
+              </span>
+            )}
           </span>
         </div>
       }
@@ -72,6 +82,7 @@ export default function ConfirmDestructive({
         explanation={explanation}
         confirmText={confirmText}
         confirmLabel={confirmLabel}
+        severity={severity}
         loading={loading}
         onConfirm={onConfirm}
         onCancel={onCancel}
@@ -85,16 +96,18 @@ function ConfirmBody({
   explanation,
   confirmText,
   confirmLabel,
+  severity = 'high',
   loading,
   onConfirm,
   onCancel,
 }: Omit<ConfirmDestructiveProps, 'open' | 'title'>) {
   const { t } = useTranslation()
   const [typed, setTyped] = useState('')
-  // Settings → Bảo mật: when the user disables dangerous-action confirms,
-  // skip the type-to-confirm input (the modal itself still shows).
+  // Type-to-confirm only for high severity, and only when the user hasn't
+  // disabled dangerous-action confirms in Settings → Bảo mật.
   const confirmDanger = useUiPrefStore((s) => s.confirmDanger)
-  const ready = !confirmDanger || typed.trim() === confirmText
+  const requireTyping = severity === 'high' && confirmDanger
+  const ready = !requireTyping || typed.trim() === confirmText
 
   const visible = items?.slice(0, MAX_ITEMS) || []
   const more = (items?.length || 0) - visible.length
@@ -122,7 +135,7 @@ function ConfirmBody({
 
       {explanation != null && <p className="mb-[13px] text-[12.5px] text-fg-2">{explanation}</p>}
 
-      {confirmDanger && (
+      {requireTyping && (
         <>
           <label className="mb-1.5 block font-mono text-[11px] tracking-[.08em] text-fg-3 uppercase">
             {t('Type')} <span className="normal-case text-danger">{confirmText}</span> {t('to confirm')}

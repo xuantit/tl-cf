@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tl-cf — Console Design (1a)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   TOKENS — Console 1a
+   ============================================================ */
+:root{
+  --bg:#ffffff;
+  --bg-app:#f6f6f7;
+  --bg-side:#fbfbfc;
+  --bg-hover:#f7f7f8;
+  --bg-sel:#fff7ef;
+  --stroke:#e7e7ea;
+  --stroke-2:#f0f0f2;
+  --fg:#15161a;
+  --fg-2:#6b6f76;
+  --fg-3:#9aa0a6;
+  --accent:#f6821f;
+  --accent-hover:#e4720f;
+  --accent-soft:#fff2e5;
+  --ok:#12a150; --warn:#f5a524; --danger:#e5484d; --info:#0070f3; --off:#9aa0a6;
+  --bar:#17181c;
+
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:Inter,-apple-system,system-ui,sans-serif;
+
+  --r-xs:4px; --r-sm:6px; --r-md:8px; --r-lg:12px;
+  --ease:cubic-bezier(.16,1,.3,1);
+  --d1:110ms; --d2:180ms;
+
+  --row-h:29px;
+  --sb-w:150px;
+}
+html.dark{
+  --bg:#0d0e11; --bg-app:#08090b; --bg-side:#0a0b0e; --bg-hover:#15171b;
+  --bg-sel:#1e1508; --stroke:#22242a; --stroke-2:#1a1c21;
+  --fg:#e9eaec; --fg-2:#8b9098; --fg-3:#5f646b;
+  --accent-soft:#2a1a09; --bar:#111216;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--bg-app);color:var(--fg);font-size:13px;
+  line-height:1.45;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.mono{font-family:var(--mono)}
+button{font:inherit;cursor:pointer}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ============================================================
+   PREVIEW CHROME
+   ============================================================ */
+.tb{position:sticky;top:0;z-index:200;display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+  padding:9px 14px;background:var(--bg);border-bottom:1px solid var(--stroke)}
+.tb b{font-family:var(--mono);font-size:11px;letter-spacing:.02em;margin-right:6px;
+  background:var(--fg);color:var(--bg);padding:3px 7px;border-radius:var(--r-xs)}
+.tbb{border:1px solid var(--stroke);background:var(--bg);color:var(--fg-2);padding:4px 9px;
+  border-radius:var(--r-sm);font-family:var(--mono);font-size:11px;transition:all var(--d1) var(--ease)}
+.tbb:hover{background:var(--bg-hover);color:var(--fg)}
+.tbb.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.tbsep{width:1px;height:18px;background:var(--stroke);margin:0 4px}
+.stage{padding:20px 14px 40px;display:flex;justify-content:center}
+.dev{background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-lg);overflow:hidden;
+  box-shadow:0 10px 40px -14px rgb(0 0 0/.16)}
+.dev.desktop{width:100%;max-width:1340px;height:740px}
+.dev.mobile{width:392px;height:790px}
+.hide{display:none!important}
+
+/* ============================================================
+   PRIMITIVES
+   ============================================================ */
+.dot{width:6px;height:6px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}
+.dot.err{background:var(--danger)}.dot.off{background:var(--off)}.dot.info{background:var(--info)}
+.tag{font-family:var(--mono);font-size:10.5px;line-height:1;padding:3.5px 6px;border-radius:var(--r-xs);
+  background:var(--bg-hover);color:var(--fg-2);border:1px solid var(--stroke-2);display:inline-block;white-space:nowrap}
+.tag.acc{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.tag.ok{background:rgba(18,161,80,.09);color:var(--ok);border-color:transparent}
+.tag.warn{background:rgba(245,165,36,.12);color:#b46e00;border-color:transparent}
+.tag.err{background:rgba(229,72,77,.09);color:var(--danger);border-color:transparent}
+.tag.info{background:rgba(0,112,243,.09);color:var(--info);border-color:transparent}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 10px;
+  border-radius:var(--r-sm);border:1px solid var(--stroke);background:var(--bg);color:var(--fg);
+  font-family:var(--mono);font-size:11.5px;transition:all var(--d1) var(--ease);white-space:nowrap}
+.btn:hover{background:var(--bg-hover);border-color:var(--fg-3)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.pri:hover{background:var(--accent-hover)}
+.btn.dgr{color:var(--danger);border-color:var(--stroke)}
+.btn.dgr:hover{background:rgba(229,72,77,.07);border-color:var(--danger)}
+.btn.sm{height:24px;padding:0 8px;font-size:11px}
+.btn.gh{border-color:transparent;background:transparent;color:var(--fg-2)}
+.btn.gh:hover{background:var(--bg-hover);color:var(--fg)}
+.kbd{font-family:var(--mono);font-size:9.5px;border:1px solid var(--stroke);border-bottom-width:2px;
+  border-radius:var(--r-xs);padding:1.5px 4px;color:var(--fg-3);background:var(--bg)}
+.ck{width:13px;height:13px;border:1.5px solid var(--stroke);border-radius:3px;flex:none;
+  display:grid;place-items:center;font-size:9px;color:transparent;transition:all var(--d1) var(--ease)}
+.ck:hover{border-color:var(--fg-3)}
+.ck.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.ck.ring{border:none;background:none;color:var(--accent);font-size:14px}
+.lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-3);font-weight:500}
+.fade{animation:fd .22s var(--ease) both}
+@keyframes fd{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ============================================================
+   DESKTOP SHELL
+   ============================================================ */
+.shell{display:flex;height:100%}
+.side{width:var(--sb-w);flex:none;background:var(--bg-side);border-right:1px solid var(--stroke);
+  display:flex;flex-direction:column;padding:9px 7px}
+.side .brand{display:flex;align-items:center;gap:7px;padding:3px 5px 11px}
+.side .brand .mk{width:19px;height:19px;border-radius:5px;background:var(--accent);color:#fff;
+  display:grid;place-items:center;font-size:11px}
+.side .brand .nm{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:-.01em}
+.side .brand .v{font-family:var(--mono);font-size:9.5px;color:var(--fg-3);margin-left:auto}
+.qs{display:flex;align-items:center;gap:6px;height:26px;padding:0 7px;margin-bottom:9px;
+  border:1px solid var(--stroke);border-radius:var(--r-sm);background:var(--bg);
+  font-family:var(--mono);font-size:11px;color:var(--fg-3);transition:all var(--d1) var(--ease)}
+.qs:hover{border-color:var(--fg-3)}
+.ni{display:flex;align-items:center;gap:8px;height:26px;padding:0 7px;border-radius:var(--r-sm);
+  font-size:12.5px;color:var(--fg-2);transition:all var(--d1) var(--ease);cursor:pointer;position:relative}
+.ni:hover{background:var(--bg-hover);color:var(--fg)}
+.ni.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.ni .ic{font-size:12px;width:14px;text-align:center;opacity:.9}
+.ni .ct{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--fg-3)}
+.ni.on .ct{color:var(--accent);opacity:.75}
+.nsep{height:1px;background:var(--stroke);margin:8px 5px}
+.side .foot{margin-top:auto;display:flex;align-items:center;gap:7px;padding:7px 5px 2px;
+  border-top:1px solid var(--stroke);cursor:pointer}
+.side .foot .av{width:19px;height:19px;border-radius:var(--r-xs);background:var(--fg);color:var(--bg);
+  display:grid;place-items:center;font-family:var(--mono);font-size:9px;font-weight:600}
+.side .foot .em{font-family:var(--mono);font-size:10.5px;color:var(--fg-2);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);position:relative}
+.hd{display:flex;align-items:center;gap:9px;padding:11px 16px 0}
+.hd h1{font-size:16.5px;font-weight:600;letter-spacing:-.02em}
+.hd .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3)}
+.hd .act{margin-left:auto;display:flex;gap:6px}
+.tabs{display:flex;gap:16px;padding:9px 16px 0;border-bottom:1px solid var(--stroke)}
+.tab{font-size:12.5px;color:var(--fg-2);padding:5px 0 7px;border-bottom:2px solid transparent;
+  cursor:pointer;transition:all var(--d1) var(--ease);white-space:nowrap}
+.tab:hover{color:var(--fg)}
+.tab.on{color:var(--fg);border-bottom-color:var(--accent);font-weight:500}
+.tab .n{font-family:var(--mono);font-size:10px;color:var(--fg-3);margin-left:4px}
+.body{flex:1;overflow:auto;padding-bottom:44px}
+
+/* table */
+table{width:100%;border-collapse:collapse}
+thead th{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-3);font-weight:500;text-align:left;padding:8px 10px;
+  border-bottom:1px solid var(--stroke);position:sticky;top:0;background:var(--bg);z-index:2}
+tbody td{padding:0 10px;height:var(--row-h);border-bottom:1px solid var(--stroke-2);
+  font-family:var(--mono);font-size:11.5px;color:var(--fg-2);white-space:nowrap}
+tbody td.n{color:var(--fg);font-weight:500;font-size:12px}
+tbody tr{transition:background var(--d1) var(--ease);cursor:pointer}
+tbody tr:hover{background:var(--bg-hover)}
+tbody tr.sel{background:var(--bg-sel)}
+tbody tr.sel:hover{background:#ffefdd}
+html.dark tbody tr.sel:hover{background:#241a0c}
+td.c{width:30px;padding-left:14px}
+.tw{display:flex;gap:4px}
+
+/* bottom action bar */
+.abar{position:absolute;left:0;right:0;bottom:0;background:var(--bar);color:#fff;
+  display:flex;align-items:center;gap:9px;padding:0 14px;height:40px;
+  animation:up .2s var(--ease) both;z-index:20}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+.abar .txt{font-family:var(--mono);font-size:11.5px}
+.abar .txt b{color:var(--accent)}
+.abar .lnk{font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.5);cursor:pointer}
+.abar .lnk:hover{color:#fff}
+.abar .grp{margin-left:auto;display:flex;gap:6px}
+.abar .btn{background:transparent;border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.82)}
+.abar .btn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);color:#fff}
+.abar .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.abar .btn.dgr{color:#ff8f8f;border-color:rgba(255,143,143,.28)}
+.abar .btn.dgr:hover{background:rgba(229,72,77,.16);color:#fff}
+
+/* panels / detail */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid var(--stroke)}
+.grid2>div+div{border-left:1px solid var(--stroke)}
+.pane{padding:13px 16px}
+.kv{display:flex;align-items:center;justify-content:space-between;height:26px;
+  border-bottom:1px solid var(--stroke-2);font-size:12.5px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--fg-2)}
+.kv .v{font-family:var(--mono);font-size:11.5px;display:flex;align-items:center;gap:6px}
+.sechd{display:flex;align-items:center;gap:8px;padding:9px 16px;background:var(--bg-side);
+  border-bottom:1px solid var(--stroke);border-top:1px solid var(--stroke)}
+.sechd .act{margin-left:auto;display:flex;gap:6px}
+.swi{width:28px;height:16px;border-radius:99px;background:var(--stroke);position:relative;
+  transition:background var(--d2) var(--ease);flex:none}
+.swi::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
+  background:#fff;transition:transform var(--d2) var(--ease);box-shadow:0 1px 2px rgb(0 0 0/.2)}
+.swi.on{background:var(--accent)}
+.swi.on::after{transform:translateX(12px)}
+
+/* stats strip */
+.strip{display:flex;border-bottom:1px solid var(--stroke)}
+.strip .c{flex:1;padding:10px 16px;border-right:1px solid var(--stroke)}
+.strip .c:last-child{border-right:0}
+.strip .v{font-family:var(--mono);font-size:19px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.strip .l{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-3);margin-top:2px}
+
+/* timeline (history / audit) */
+.tl{padding:0}
+.tl .it{display:flex;gap:11px;padding:9px 16px;border-bottom:1px solid var(--stroke-2);
+  transition:background var(--d1) var(--ease);cursor:pointer}
+.tl .it:hover{background:var(--bg-hover)}
+.tl .tm{font-family:var(--mono);font-size:10.5px;color:var(--fg-3);width:96px;flex:none;padding-top:1px}
+.tl .bd{flex:1;min-width:0}
+.tl .t1{font-size:12.5px}
+.tl .t1 code{font-family:var(--mono);font-size:11.5px;background:var(--bg-hover);
+  padding:1px 4px;border-radius:3px;border:1px solid var(--stroke-2)}
+.tl .t2{font-family:var(--mono);font-size:10.5px;color:var(--fg-3);margin-top:3px}
+
+/* empty */
+.empty{padding:56px 16px;text-align:center}
+.empty .i{font-size:26px;opacity:.35}
+.empty .t{font-size:13px;font-weight:500;margin-top:10px}
+.empty .d{font-family:var(--mono);font-size:11px;color:var(--fg-3);margin-top:4px}
+
+/* command palette overlay */
+.ovl{position:absolute;inset:0;background:rgb(0 0 0/.28);backdrop-filter:blur(2px);
+  display:flex;justify-content:center;padding-top:88px;z-index:60;animation:fd .16s var(--ease) both}
+html.dark .ovl{background:rgb(0 0 0/.5)}
+.cmdk{width:520px;background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-lg);
+  box-shadow:0 22px 60px -18px rgb(0 0 0/.4);overflow:hidden;height:max-content;
+  animation:pop .2s var(--ease) both}
+@keyframes pop{from{opacity:0;transform:scale(.97) translateY(-6px)}to{opacity:1;transform:none}}
+.cmdk .in{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--stroke);
+  font-family:var(--mono);font-size:13px;color:var(--fg-3)}
+.cmdk .in .q{color:var(--fg)}
+.cmdk .in .cur{width:1.5px;height:14px;background:var(--accent);animation:bl 1s steps(2) infinite}
+@keyframes bl{50%{opacity:0}}
+.cmdk .grp{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-3);padding:9px 13px 4px}
+.cmdk .it{display:flex;align-items:center;gap:9px;padding:6.5px 13px;font-size:12.5px;cursor:pointer}
+.cmdk .it .ic{width:14px;text-align:center;font-size:12px;opacity:.8}
+.cmdk .it .m{font-family:var(--mono);font-size:10.5px;color:var(--fg-3);margin-left:auto}
+.cmdk .it.on{background:var(--accent-soft);color:var(--accent)}
+.cmdk .it.on .m{color:var(--accent);opacity:.7}
+.cmdk .ft{display:flex;gap:13px;padding:7px 13px;border-top:1px solid var(--stroke);
+  font-family:var(--mono);font-size:10px;color:var(--fg-3)}
+
+/* login */
+.login{height:100%;display:grid;place-items:center;background:var(--bg-app)}
+.lcard{width:340px;background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-lg);
+  padding:26px 24px;box-shadow:0 8px 30px -12px rgb(0 0 0/.12)}
+.fi{margin-bottom:11px}
+.fi label{display:block;font-family:var(--mono);font-size:10px;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--fg-3);margin-bottom:5px}
+.fi .ip{height:32px;border:1px solid var(--stroke);border-radius:var(--r-sm);display:flex;
+  align-items:center;padding:0 9px;font-family:var(--mono);font-size:12px;color:var(--fg-3);
+  transition:border-color var(--d1) var(--ease)}
+.fi .ip.fc{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* ============================================================
+   MOBILE
+   ============================================================ */
+.m{height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.mstat{display:flex;align-items:center;padding:6px 14px 2px;font-family:var(--mono);
+  font-size:10.5px;color:var(--fg-2)}
+.mstat .c{margin:0 auto}
+.mhd{padding:5px 14px 9px}
+.mhd h1{font-size:19px;font-weight:600;letter-spacing:-.02em}
+.mhd .sub{font-family:var(--mono);font-size:10.5px;color:var(--fg-3);margin-top:2px}
+.mhd .fab{position:absolute;right:14px;top:30px;width:32px;height:32px;border-radius:var(--r-md);
+  background:var(--accent);color:#fff;display:grid;place-items:center;font-size:16px;
+  box-shadow:0 3px 10px -2px rgba(246,130,31,.5)}
+.msrch{margin:0 14px 9px;display:flex;align-items:center;gap:7px;height:32px;padding:0 9px;
+  border:1px solid var(--stroke);border-radius:var(--r-md);font-family:var(--mono);
+  font-size:11.5px;color:var(--fg-3)}
+.mseg{display:flex;gap:5px;padding:0 14px 9px;overflow-x:auto;scrollbar-width:none}
+.mseg::-webkit-scrollbar{display:none}
+.mseg .s{flex:none;font-family:var(--mono);font-size:10.5px;padding:4px 8px;border-radius:var(--r-sm);
+  border:1px solid var(--stroke);color:var(--fg-2);white-space:nowrap;transition:all var(--d1) var(--ease)}
+.mseg .s.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.mseg .s .n{opacity:.55;margin-left:3px}
+.mbody{flex:1;overflow:auto;border-top:1px solid var(--stroke)}
+.mrow{display:flex;align-items:center;gap:11px;padding:9px 14px;border-bottom:1px solid var(--stroke-2);
+  position:relative;transition:background var(--d1) var(--ease)}
+.mrow:active{background:var(--bg-hover)}
+.mrow::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2.5px;background:var(--accent);opacity:.85}
+.mrow.nb::before{display:none}
+.mrow .n{font-family:var(--mono);font-size:12.5px;font-weight:500;color:var(--fg)}
+.mrow .meta{font-family:var(--mono);font-size:10px;color:var(--fg-3);margin-top:3px;
+  display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mrow .ch{margin-left:auto;color:var(--fg-3);font-size:13px}
+.mrow.pick::before{display:none}
+.mrow.pick.on{background:var(--bg-sel)}
+.mnav{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--stroke);
+  background:var(--bg);padding-bottom:env(safe-area-inset-bottom)}
+.mnav .b{display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 0 9px;
+  font-family:var(--mono);font-size:9.5px;color:var(--fg-3);position:relative;
+  transition:color var(--d1) var(--ease)}
+.mnav .b .ic{font-size:16px;transition:transform var(--d1) var(--ease)}
+.mnav .b:active .ic{transform:scale(.86)}
+.mnav .b.on{color:var(--accent)}
+.mnav .b.on::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:20px;height:2px;background:var(--accent);border-radius:0 0 2px 2px}
+.mbar{background:var(--bar);color:#fff;padding:9px 14px 11px}
+.mbar .hd{display:flex;align-items:center;font-family:var(--mono);font-size:11px;margin-bottom:8px}
+.mbar .hd b{color:var(--accent)}
+.mbar .hd .x{margin-left:auto;color:rgba(255,255,255,.5)}
+.mbar .r{display:flex;gap:7px}
+.mbar .btn{background:transparent;border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.82);height:36px}
+.mbar .btn.pri{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
+.mbar .btn.dgr{color:#ff8f8f;border-color:rgba(255,143,143,.28)}
+.mtop{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--stroke)}
+.mtop .bk{font-size:15px;color:var(--fg-2)}
+.mtop .ti{font-family:var(--mono);font-size:12.5px;font-weight:600}
+.mtop .st{font-family:var(--mono);font-size:9.5px;color:var(--fg-3)}
+.mkv{display:flex;align-items:center;justify-content:space-between;padding:0 14px;height:34px;
+  border-bottom:1px solid var(--stroke-2);font-size:12.5px}
+.mkv .v{font-family:var(--mono);font-size:11.5px;display:flex;align-items:center;gap:6px}
+.msec{display:flex;align-items:center;padding:9px 14px;background:var(--bg-side);
+  border-top:1px solid var(--stroke);border-bottom:1px solid var(--stroke)}
+</style>
+</head>
+<body>
+
+<div class="tb">
+  <b>1a CONSOLE</b>
+  <button class="tbb on" id="bD">🖥 desktop</button>
+  <button class="tbb" id="bM">📱 mobile</button>
+  <span class="tbsep"></span>
+  <button class="tbb" id="bT">🌙 dark</button>
+  <span class="tbsep"></span>
+  <button class="tbb on" data-s="domains">domains</button>
+  <button class="tbb" data-s="detail">detail·dns</button>
+  <button class="tbb" data-s="cache">cache</button>
+  <button class="tbb" data-s="rules">rules</button>
+  <button class="tbb" data-s="templates">templates</button>
+  <button class="tbb" data-s="history">history</button>
+  <button class="tbb" data-s="accounts">accounts</button>
+  <button class="tbb" data-s="users">users</button>
+  <button class="tbb" data-s="audit">audit</button>
+  <button class="tbb" data-s="login">login</button>
+  <span class="tbsep"></span>
+  <button class="tbb" id="bK">⌘K palette</button>
+  <button class="tbb on" id="bS">☑ selection</button>
+</div>
+
+<div class="stage">
+<div class="dev desktop" id="dev">
+
+<!-- ============================ DESKTOP ============================ -->
+<div id="desktop" class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="side">
+    <div class="brand"><div class="mk">☁</div><div class="nm">CF Tool</div><div class="v">v2</div></div>
+    <div class="qs" id="qsBtn"><span>⌕</span><span>Tìm nhanh</span><span style="margin-left:auto" class="kbd">⌘K</span></div>
+    <div class="ni on" data-nav="domains"><span class="ic">◈</span>Domains<span class="ct">305</span></div>
+    <div class="ni" data-nav="templates"><span class="ic">▤</span>Templates<span class="ct">12</span></div>
+    <div class="ni" data-nav="history"><span class="ic">◷</span>Lịch sử<span class="ct">48</span></div>
+    <div class="nsep"></div>
+    <div class="ni" data-nav="accounts"><span class="ic">⌂</span>Tài khoản<span class="ct">3</span></div>
+    <div class="nsep"></div>
+    <div class="ni" data-nav="users"><span class="ic">◉</span>Người dùng<span class="ct">9</span></div>
+    <div class="ni" data-nav="audit"><span class="ic">✎</span>Audit log</div>
+    <div class="foot"><div class="av">XT</div><div class="em">xuan@tienlen.dev</div></div>
+  </aside>
+
+  <div class="main">
+
+    <!-- ========== DOMAINS ========== -->
+    <div class="v" data-v="domains">
+      <div class="hd">
+        <h1>Domains</h1>
+        <span class="crumb">Main account · 305 zones</span>
+        <div class="act">
+          <button class="btn">⊞ Bulk add</button>
+          <button class="btn pri">+ Add domain</button>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab on">Tất cả<span class="n">305</span></div>
+        <div class="tab">Đang hoạt động<span class="n">288</span></div>
+        <div class="tab">Chờ xử lý<span class="n">11</span></div>
+        <div class="tab">SSL off<span class="n">6</span></div>
+        <div class="tab">Theo tag</div>
+      </div>
+      <div class="body">
+        <table>
+          <thead><tr>
+            <th class="c" style="padding-left:14px"><span class="ck"></span></th>
+            <th>Domain</th><th>Plan</th><th>Status</th><th>SSL</th><th>DNS</th><th>Tags</th><th></th>
+          </tr></thead>
+          <tbody id="dtb">
+            <tr class="sel"><td class="c"><span class="ck ring">◉</span></td><td class="n">shop-abc.com</td><td>Pro</td><td><span class="dot ok"></span> active</td><td>full</td><td>18</td><td><span class="tw"><i class="tag">shop</i><i class="tag">prod</i></span></td><td>›</td></tr>
+            <tr class="sel"><td class="c"><span class="ck ring">◉</span></td><td class="n">tienlen.vn</td><td>Business</td><td><span class="dot ok"></span> active</td><td>strict</td><td>24</td><td><span class="tag">core</span></td><td>›</td></tr>
+            <tr class="sel"><td class="c"><span class="ck ring">◉</span></td><td class="n">blog.tuanle.dev</td><td>Free</td><td><span class="dot ok"></span> active</td><td>flexible</td><td>9</td><td><span class="tag">blog</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">api-gateway.io</td><td>Pro</td><td><span class="dot ok"></span> active</td><td>strict</td><td>31</td><td><span class="tag">api</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">cdn-static.net</td><td>Free</td><td><span class="dot warn"></span> pending</td><td>off</td><td>4</td><td><span class="tag">cdn</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">landing-q3.vn</td><td>Free</td><td><span class="dot warn"></span> pending</td><td>flexible</td><td>6</td><td><span class="tag">mkt</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">checkout-abc.com</td><td>Enterprise</td><td><span class="dot ok"></span> active</td><td>strict</td><td>27</td><td><span class="tw"><i class="tag">shop</i><i class="tag">pci</i></span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">img-proxy.dev</td><td>Free</td><td><span class="dot ok"></span> active</td><td>full</td><td>11</td><td><span class="tag">cdn</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">mail.tienlen.vn</td><td>Free</td><td><span class="dot ok"></span> active</td><td>full</td><td>15</td><td><span class="tag">mail</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">status-page.io</td><td>Free</td><td><span class="dot off"></span> moved</td><td>off</td><td>3</td><td></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">affiliate-hub.vn</td><td>Pro</td><td><span class="dot ok"></span> active</td><td>full</td><td>22</td><td><span class="tag">mkt</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">docs.tienlen.dev</td><td>Free</td><td><span class="dot ok"></span> active</td><td>strict</td><td>7</td><td><span class="tag">docs</span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">game-cdn.asia</td><td>Business</td><td><span class="dot ok"></span> active</td><td>strict</td><td>19</td><td><span class="tw"><i class="tag">cdn</i><i class="tag">prod</i></span></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">old-shop.vn</td><td>Free</td><td><span class="dot warn"></span> pending</td><td>off</td><td>2</td><td></td><td>›</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">promo-tet.vn</td><td>Free</td><td><span class="dot err"></span> error</td><td>off</td><td>1</td><td><span class="tag">mkt</span></td><td>›</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="abar sb">
+        <span class="txt"><b>3 domain</b> đã chọn</span><span class="lnk">— bỏ chọn</span>
+        <div class="grp">
+          <button class="btn pri">↻ Purge cache</button>
+          <button class="btn">⇄ DNS replace</button>
+          <button class="btn">⊘ Gắn tag</button>
+          <button class="btn dgr">▢ Xoá</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== DOMAIN DETAIL · DNS ========== -->
+    <div class="v hide" data-v="detail">
+      <div class="hd">
+        <span class="crumb" style="cursor:pointer">Domains ›</span>
+        <h1 class="mono" style="font-size:15.5px">tienlen.vn</h1>
+        <span class="tag ok"><span class="dot ok"></span> active</span>
+        <span class="tag">Business</span>
+        <div class="act">
+          <button class="btn">↻ Purge</button>
+          <button class="btn">▤ Apply template</button>
+          <button class="btn pri">+ DNS record</button>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab">Overview</div>
+        <div class="tab on">DNS<span class="n">24</span></div>
+        <div class="tab">Cache</div>
+        <div class="tab">Rules<span class="n">4</span></div>
+        <div class="tab">Security</div>
+        <div class="tab">Tags</div>
+      </div>
+      <div class="body">
+        <div class="sechd">
+          <span class="lbl">DNS records · 24</span>
+          <span class="tag">zone a1b2c3d4e5f6</span>
+          <div class="act">
+            <button class="btn sm gh">⌕ filter</button>
+            <button class="btn sm gh">↧ export</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr>
+            <th class="c" style="padding-left:14px"><span class="ck"></span></th>
+            <th>Type</th><th>Name</th><th>Content</th><th>TTL</th><th>Proxy</th><th>Prio</th><th></th>
+          </tr></thead>
+          <tbody>
+            <tr class="sel"><td class="c"><span class="ck ring">◉</span></td><td><span class="tag info">A</span></td><td class="n">@</td><td>203.0.113.10</td><td>auto</td><td><span class="tag acc">proxied</span></td><td>—</td><td>⋯</td></tr>
+            <tr class="sel"><td class="c"><span class="ck ring">◉</span></td><td><span class="tag info">A</span></td><td class="n">www</td><td>203.0.113.10</td><td>auto</td><td><span class="tag acc">proxied</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">CNAME</span></td><td class="n">cdn</td><td>cdn.tienlen.vn.cdn.cf</td><td>auto</td><td><span class="tag acc">proxied</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">CNAME</span></td><td class="n">shop</td><td>shops.myshopify.com</td><td>auto</td><td><span class="tag">dns only</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag warn">MX</span></td><td class="n">@</td><td>aspmx.l.google.com</td><td>3600</td><td><span class="tag">dns only</span></td><td>1</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag warn">MX</span></td><td class="n">@</td><td>alt1.aspmx.l.google.com</td><td>3600</td><td><span class="tag">dns only</span></td><td>5</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">TXT</span></td><td class="n">@</td><td>v=spf1 include:_spf.goo…</td><td>auto</td><td><span class="tag">dns only</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">TXT</span></td><td class="n">_dmarc</td><td>v=DMARC1; p=quarantine…</td><td>auto</td><td><span class="tag">dns only</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">AAAA</span></td><td class="n">@</td><td>2606:4700:3033::6815</td><td>auto</td><td><span class="tag acc">proxied</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">SRV</span></td><td class="n">_sip._tcp</td><td>10 60 5060 sip.tienlen.vn</td><td>auto</td><td><span class="tag">dns only</span></td><td>10</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">NS</span></td><td class="n">sub</td><td>ns1.otherdns.com</td><td>86400</td><td><span class="tag">dns only</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td><span class="tag">CAA</span></td><td class="n">@</td><td>0 issue "letsencrypt.org"</td><td>auto</td><td><span class="tag">dns only</span></td><td>—</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="abar sb">
+        <span class="txt"><b>2 record</b> đã chọn</span><span class="lnk">— bỏ chọn</span>
+        <div class="grp">
+          <button class="btn pri">✎ Sửa hàng loạt</button>
+          <button class="btn">⇄ Đổi IP</button>
+          <button class="btn">◐ Toggle proxy</button>
+          <button class="btn dgr">▢ Xoá</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== CACHE ========== -->
+    <div class="v hide" data-v="cache">
+      <div class="hd">
+        <span class="crumb" style="cursor:pointer">Domains ›</span>
+        <h1 class="mono" style="font-size:15.5px">tienlen.vn</h1>
+        <span class="tag ok"><span class="dot ok"></span> active</span>
+        <div class="act"><button class="btn pri">↻ Purge everything</button></div>
+      </div>
+      <div class="tabs">
+        <div class="tab">Overview</div><div class="tab">DNS<span class="n">24</span></div>
+        <div class="tab on">Cache</div><div class="tab">Rules<span class="n">4</span></div>
+        <div class="tab">Security</div><div class="tab">Tags</div>
+      </div>
+      <div class="body">
+        <div class="strip">
+          <div class="c"><div class="v">94.2<span style="font-size:12px;color:var(--fg-3)">%</span></div><div class="l">cache hit</div></div>
+          <div class="c"><div class="v">1.24<span style="font-size:12px;color:var(--fg-3)">TB</span></div><div class="l">bandwidth saved</div></div>
+          <div class="c"><div class="v">18.4<span style="font-size:12px;color:var(--fg-3)">M</span></div><div class="l">requests 24h</div></div>
+          <div class="c"><div class="v">42<span style="font-size:12px;color:var(--fg-3)">ms</span></div><div class="l">avg ttfb</div></div>
+        </div>
+        <div class="grid2">
+          <div class="pane">
+            <div class="lbl" style="margin-bottom:9px">Cấu hình cache</div>
+            <div class="kv"><span class="k">Cache level</span><span class="v"><span class="tag">standard</span>▾</span></div>
+            <div class="kv"><span class="k">Browser TTL</span><span class="v"><span class="tag">4 hours</span>▾</span></div>
+            <div class="kv"><span class="k">Edge TTL</span><span class="v"><span class="tag">2 hours</span>▾</span></div>
+            <div class="kv"><span class="k">Tiered cache</span><span class="v"><span class="tag acc">smart</span>▾</span></div>
+            <div class="kv"><span class="k">Always Online</span><span class="v"><span class="swi on"></span></span></div>
+            <div class="kv"><span class="k">Development mode</span><span class="v"><span class="swi"></span></span></div>
+          </div>
+          <div class="pane">
+            <div class="lbl" style="margin-bottom:9px">Purge theo URL</div>
+            <div style="border:1px solid var(--stroke);border-radius:var(--r-sm);padding:9px;
+              font-family:var(--mono);font-size:11px;color:var(--fg-2);height:104px;line-height:1.8">
+              https://tienlen.vn/assets/app.css<br>
+              https://tienlen.vn/assets/app.js<br>
+              <span style="color:var(--fg-3)">https://tienlen.vn/img/*</span><br>
+              <span style="border-left:1.5px solid var(--accent);display:inline-block;height:12px;vertical-align:-2px"></span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:9px;align-items:center">
+              <button class="btn pri">↻ Purge 3 URL</button>
+              <button class="btn">◫ Purge by tag</button>
+              <span class="mono" style="font-size:10px;color:var(--fg-3);margin-left:auto">tối đa 30 URL / lần</span>
+            </div>
+          </div>
+        </div>
+        <div class="sechd"><span class="lbl">Purge gần đây</span></div>
+        <div class="tl">
+          <div class="it"><span class="tm">14:22:08</span><div class="bd"><div class="t1">Purge <code>everything</code> — thành công</div><div class="t2">xuan@tienlen.dev · 1.2s</div></div><span class="tag ok">ok</span></div>
+          <div class="it"><span class="tm">11:03:41</span><div class="bd"><div class="t1">Purge <code>/assets/*</code> — 128 file</div><div class="t2">xuan@tienlen.dev · 0.6s</div></div><span class="tag ok">ok</span></div>
+          <div class="it"><span class="tm">09:15:00</span><div class="bd"><div class="t1">Purge by tag <code>release-v42</code></div><div class="t2">ci-bot · 0.4s</div></div><span class="tag ok">ok</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== RULES ========== -->
+    <div class="v hide" data-v="rules">
+      <div class="hd">
+        <span class="crumb" style="cursor:pointer">Domains ›</span>
+        <h1 class="mono" style="font-size:15.5px">tienlen.vn</h1>
+        <div class="act"><button class="btn">▤ Từ template</button><button class="btn pri">+ Thêm rule</button></div>
+      </div>
+      <div class="tabs">
+        <div class="tab">Overview</div><div class="tab">DNS<span class="n">24</span></div>
+        <div class="tab">Cache</div><div class="tab on">Rules<span class="n">4</span></div>
+        <div class="tab">Security</div><div class="tab">Tags</div>
+      </div>
+      <div class="body">
+        <div class="sechd"><span class="lbl">Page rules · 4 / 20 đã dùng</span>
+          <div class="act"><button class="btn sm gh">⇅ đổi thứ tự</button></div></div>
+        <table>
+          <thead><tr><th style="padding-left:14px;width:34px">#</th><th>Pattern</th><th>Actions</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr><td style="padding-left:14px;color:var(--fg-3)">1</td><td class="n">*tienlen.vn/assets/*</td>
+              <td><span class="tw"><i class="tag acc">cache=everything</i><i class="tag">edge_ttl=1mo</i></span></td>
+              <td><span class="dot ok"></span> active</td><td>⋯</td></tr>
+            <tr><td style="padding-left:14px;color:var(--fg-3)">2</td><td class="n">*tienlen.vn/api/*</td>
+              <td><span class="tw"><i class="tag">cache=bypass</i><i class="tag">ssl=strict</i></span></td>
+              <td><span class="dot ok"></span> active</td><td>⋯</td></tr>
+            <tr><td style="padding-left:14px;color:var(--fg-3)">3</td><td class="n">*tienlen.vn/admin*</td>
+              <td><span class="tw"><i class="tag err">security=high</i><i class="tag">cache=bypass</i></span></td>
+              <td><span class="dot ok"></span> active</td><td>⋯</td></tr>
+            <tr style="opacity:.55"><td style="padding-left:14px;color:var(--fg-3)">4</td><td class="n">*tienlen.vn/old/*</td>
+              <td><span class="tag">forwarding_url=301</span></td>
+              <td><span class="dot off"></span> disabled</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+        <div class="sechd"><span class="lbl">Redirect rules</span></div>
+        <table>
+          <thead><tr><th style="padding-left:14px">Từ</th><th>Đến</th><th>Code</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="n" style="padding-left:14px">www.tienlen.vn/*</td><td>tienlen.vn/$1</td><td><span class="tag">301</span></td><td><span class="dot ok"></span> active</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">tienlen.vn/blog/*</td><td>blog.tuanle.dev/$1</td><td><span class="tag">302</span></td><td><span class="dot ok"></span> active</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== TEMPLATES ========== -->
+    <div class="v hide" data-v="templates">
+      <div class="hd"><h1>Templates</h1><span class="crumb">12 mẫu · áp dụng hàng loạt</span>
+        <div class="act"><button class="btn">↥ Import JSON</button><button class="btn pri">+ Tạo template</button></div></div>
+      <div class="tabs"><div class="tab on">Tất cả<span class="n">12</span></div><div class="tab">DNS<span class="n">5</span></div>
+        <div class="tab">Cache<span class="n">4</span></div><div class="tab">Rules<span class="n">3</span></div></div>
+      <div class="body">
+        <table>
+          <thead><tr><th style="padding-left:14px">Tên</th><th>Loại</th><th>Mục</th><th>Đã áp dụng</th><th>Cập nhật</th><th>Tác giả</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="n" style="padding-left:14px">base-dns-google-mx</td><td><span class="tag info">dns</span></td><td>6 records</td><td>142 zones</td><td>2d trước</td><td>xuan</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">static-site-cache</td><td><span class="tag acc">cache</span></td><td>5 settings</td><td>88 zones</td><td>5d trước</td><td>xuan</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">shop-hardening</td><td><span class="tag err">rules</span></td><td>4 rules</td><td>23 zones</td><td>1w trước</td><td>tuan</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">spf-dkim-dmarc</td><td><span class="tag info">dns</span></td><td>3 records</td><td>201 zones</td><td>2w trước</td><td>xuan</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">cdn-aggressive-ttl</td><td><span class="tag acc">cache</span></td><td>4 settings</td><td>31 zones</td><td>3w trước</td><td>tuan</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">landing-page-basic</td><td><span class="tag err">rules</span></td><td>2 rules</td><td>17 zones</td><td>1mo trước</td><td>minh</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== HISTORY ========== -->
+    <div class="v hide" data-v="history">
+      <div class="hd"><h1>Lịch sử</h1><span class="crumb">48 thao tác · 7 ngày qua</span>
+        <div class="act"><button class="btn">⌕ Lọc</button><button class="btn">↧ Export CSV</button></div></div>
+      <div class="tabs"><div class="tab on">Tất cả<span class="n">48</span></div><div class="tab">Thành công<span class="n">44</span></div>
+        <div class="tab">Lỗi<span class="n">4</span></div><div class="tab">Có thể rollback<span class="n">12</span></div></div>
+      <div class="body">
+        <div class="sechd"><span class="lbl">Hôm nay · 28/07/2026</span></div>
+        <div class="tl">
+          <div class="it"><span class="tm">15:41:02</span><div class="bd">
+            <div class="t1">Bulk purge cache — <code>3 zones</code></div>
+            <div class="t2">shop-abc.com, tienlen.vn, blog.tuanle.dev · xuan@tienlen.dev</div></div>
+            <span class="tag ok">ok</span><button class="btn sm gh" style="margin-left:8px">↺ rollback</button></div>
+          <div class="it"><span class="tm">15:12:47</span><div class="bd">
+            <div class="t1">Áp template <code>base-dns-google-mx</code> — <code>12 zones</code></div>
+            <div class="t2">72 record được tạo · xuan@tienlen.dev</div></div>
+            <span class="tag ok">ok</span><button class="btn sm gh" style="margin-left:8px">↺ rollback</button></div>
+          <div class="it"><span class="tm">14:03:19</span><div class="bd">
+            <div class="t1">DNS replace <code>203.0.113.9 → 203.0.113.10</code></div>
+            <div class="t2">28 record trên 9 zone · tuan@tienlen.dev</div></div>
+            <span class="tag ok">ok</span><button class="btn sm gh" style="margin-left:8px">↺ rollback</button></div>
+          <div class="it"><span class="tm">11:58:00</span><div class="bd">
+            <div class="t1">Tạo DNS record <code>A cdn.promo-tet.vn</code></div>
+            <div class="t2">Cloudflare API 403 — token thiếu quyền <code>#dns_records:edit</code></div></div>
+            <span class="tag err">failed</span></div>
+          <div class="it"><span class="tm">09:30:12</span><div class="bd">
+            <div class="t1">Bật <code>Always Use HTTPS</code> — <code>41 zones</code></div>
+            <div class="t2">ci-bot · qua API key</div></div><span class="tag ok">ok</span></div>
+        </div>
+        <div class="sechd"><span class="lbl">Hôm qua · 27/07/2026</span></div>
+        <div class="tl">
+          <div class="it"><span class="tm">22:14:55</span><div class="bd">
+            <div class="t1">Xoá zone <code>old-promo.vn</code></div>
+            <div class="t2">xuan@tienlen.dev</div></div><span class="tag warn">destructive</span></div>
+          <div class="it"><span class="tm">18:02:31</span><div class="bd">
+            <div class="t1">Gắn tag <code>prod</code> — <code>34 zones</code></div>
+            <div class="t2">tuan@tienlen.dev</div></div><span class="tag ok">ok</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== ACCOUNTS ========== -->
+    <div class="v hide" data-v="accounts">
+      <div class="hd"><h1>Tài khoản Cloudflare</h1><span class="crumb">3 kết nối</span>
+        <div class="act"><button class="btn pri">+ Kết nối tài khoản</button></div></div>
+      <div class="tabs"><div class="tab on">Tất cả<span class="n">3</span></div><div class="tab">API Token<span class="n">2</span></div>
+        <div class="tab">Global Key<span class="n">1</span></div></div>
+      <div class="body">
+        <table>
+          <thead><tr><th style="padding-left:14px">Nhãn</th><th>Loại</th><th>Email / Token</th><th>Zones</th><th>Trạng thái</th><th>Kiểm tra</th><th></th></tr></thead>
+          <tbody>
+            <tr class="sel"><td class="n" style="padding-left:14px"><span class="dot ok" style="margin-right:6px"></span>Main account</td>
+              <td><span class="tag info">api token</span></td><td>••••••••••••Ff3q</td><td>305</td>
+              <td><span class="tag ok">đang dùng</span></td><td>2 phút trước</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px"><span class="dot off" style="margin-right:6px"></span>Client — ABC Corp</td>
+              <td><span class="tag info">api token</span></td><td>••••••••••••Kx91</td><td>42</td>
+              <td><span class="tag">sẵn sàng</span></td><td>1 giờ trước</td><td>⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px"><span class="dot warn" style="margin-right:6px"></span>Legacy (global key)</td>
+              <td><span class="tag warn">global key</span></td><td>admin@old.vn</td><td>18</td>
+              <td><span class="tag warn">nên thay bằng token</span></td><td>3 ngày trước</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+        <div class="sechd"><span class="lbl">Quyền của token đang dùng</span>
+          <div class="act"><button class="btn sm gh">↻ kiểm tra lại</button></div></div>
+        <div class="grid2">
+          <div class="pane">
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#zone:read</span><span class="v"><span class="tag ok">có</span></span></div>
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#dns_records:edit</span><span class="v"><span class="tag ok">có</span></span></div>
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#cache_purge:purge</span><span class="v"><span class="tag ok">có</span></span></div>
+          </div>
+          <div class="pane">
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#zone_settings:edit</span><span class="v"><span class="tag ok">có</span></span></div>
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#page_rules:edit</span><span class="v"><span class="tag err">thiếu</span></span></div>
+            <div class="kv"><span class="k mono" style="font-size:11.5px">#waf:edit</span><span class="v"><span class="tag">không cần</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== USERS ========== -->
+    <div class="v hide" data-v="users">
+      <div class="hd"><h1>Người dùng</h1><span class="crumb">9 tài khoản · 2 admin</span>
+        <div class="act"><button class="btn">✉ Mã mời</button><button class="btn pri">+ Mời</button></div></div>
+      <div class="tabs"><div class="tab on">Tất cả<span class="n">9</span></div><div class="tab">Admin<span class="n">2</span></div>
+        <div class="tab">User<span class="n">7</span></div><div class="tab">Đã khoá<span class="n">1</span></div>
+        <div class="tab">Lời mời<span class="n">3</span></div></div>
+      <div class="body">
+        <table>
+          <thead><tr><th class="c" style="padding-left:14px"><span class="ck"></span></th><th>Email</th><th>Vai trò</th><th>CF acc</th><th>Template</th><th>Trạng thái</th><th>Tạo lúc</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">xuan@tienlen.dev <span class="tag acc" style="margin-left:5px">bạn</span></td>
+              <td><span class="tag err">admin</span></td><td>3</td><td>8</td><td><span class="dot ok"></span> active</td><td>2025-11-02</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">tuan@tienlen.dev</td><td><span class="tag err">admin</span></td>
+              <td>1</td><td>3</td><td><span class="dot ok"></span> active</td><td>2025-12-14</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">minh@tienlen.dev</td><td><span class="tag">user</span></td>
+              <td>1</td><td>1</td><td><span class="dot ok"></span> active</td><td>2026-01-08</td><td>⋯</td></tr>
+            <tr><td class="c"><span class="ck"></span></td><td class="n">ci-bot@tienlen.dev</td><td><span class="tag">user</span></td>
+              <td>1</td><td>0</td><td><span class="dot ok"></span> active</td><td>2026-02-20</td><td>⋯</td></tr>
+            <tr style="opacity:.5"><td class="c"><span class="ck"></span></td><td class="n">old-dev@tienlen.dev</td><td><span class="tag">user</span></td>
+              <td>0</td><td>0</td><td><span class="dot off"></span> khoá</td><td>2025-09-30</td><td>⋯</td></tr>
+          </tbody>
+        </table>
+        <div class="sechd"><span class="lbl">Lời mời đang chờ · 3</span>
+          <div class="act"><button class="btn sm">+ Tạo mã</button></div></div>
+        <table>
+          <thead><tr><th style="padding-left:14px">Mã</th><th>Vai trò</th><th>Hết hạn</th><th>Người tạo</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="n" style="padding-left:14px">CF-8K2QP-M4X1V</td><td><span class="tag">user</span></td><td>còn 6 ngày</td><td>xuan</td><td>⧉ ⋯</td></tr>
+            <tr><td class="n" style="padding-left:14px">CF-3RTZW-99BNM</td><td><span class="tag err">admin</span></td><td>còn 2 ngày</td><td>xuan</td><td>⧉ ⋯</td></tr>
+            <tr style="opacity:.5"><td class="n" style="padding-left:14px">CF-1AAAA-00000</td><td><span class="tag">user</span></td><td><span style="color:var(--danger)">hết hạn</span></td><td>tuan</td><td>⧉ ⋯</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== AUDIT ========== -->
+    <div class="v hide" data-v="audit">
+      <div class="hd"><h1>Audit log</h1><span class="crumb">bất biến · lưu 90 ngày</span>
+        <div class="act"><button class="btn">⌕ Lọc</button><button class="btn">↧ Export</button></div></div>
+      <div class="tabs"><div class="tab on">Tất cả</div><div class="tab">Auth</div><div class="tab">Ghi dữ liệu</div>
+        <div class="tab">Destructive<span class="n">2</span></div><div class="tab">Thất bại<span class="n">4</span></div></div>
+      <div class="body">
+        <table>
+          <thead><tr><th style="padding-left:14px">Thời gian</th><th>Actor</th><th>Hành động</th><th>Đối tượng</th><th>IP</th><th>Kết quả</th></tr></thead>
+          <tbody>
+            <tr><td style="padding-left:14px">15:41:02.118</td><td class="n">xuan@tienlen.dev</td><td><span class="tag acc">cache.purge</span></td><td>3 zones</td><td>113.161.44.2</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">15:12:47.902</td><td class="n">xuan@tienlen.dev</td><td><span class="tag acc">template.apply</span></td><td>base-dns-google-mx</td><td>113.161.44.2</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">14:03:19.551</td><td class="n">tuan@tienlen.dev</td><td><span class="tag acc">dns.bulk_replace</span></td><td>28 records</td><td>27.72.100.8</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">11:58:00.240</td><td class="n">xuan@tienlen.dev</td><td><span class="tag acc">dns.create</span></td><td>promo-tet.vn</td><td>113.161.44.2</td><td><span class="tag err">403</span></td></tr>
+            <tr><td style="padding-left:14px">10:22:11.007</td><td class="n">ci-bot@tienlen.dev</td><td><span class="tag">auth.login</span></td><td>—</td><td>10.0.4.19</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">09:30:12.663</td><td class="n">ci-bot@tienlen.dev</td><td><span class="tag acc">zone.settings_edit</span></td><td>41 zones</td><td>10.0.4.19</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">22:14:55.310</td><td class="n">xuan@tienlen.dev</td><td><span class="tag err">zone.delete</span></td><td>old-promo.vn</td><td>113.161.44.2</td><td><span class="tag ok">200</span></td></tr>
+            <tr><td style="padding-left:14px">21:03:02.881</td><td class="n">unknown</td><td><span class="tag">auth.login</span></td><td>admin@tienlen.dev</td><td>45.9.148.77</td><td><span class="tag err">401</span></td></tr>
+            <tr><td style="padding-left:14px">21:02:58.412</td><td class="n">unknown</td><td><span class="tag">auth.login</span></td><td>admin@tienlen.dev</td><td>45.9.148.77</td><td><span class="tag err">401</span></td></tr>
+            <tr><td style="padding-left:14px">18:02:31.129</td><td class="n">tuan@tienlen.dev</td><td><span class="tag acc">zone.tag</span></td><td>34 zones</td><td>27.72.100.8</td><td><span class="tag ok">200</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== LOGIN ========== -->
+    <div class="v hide" data-v="login" style="height:100%">
+      <div class="login">
+        <div class="lcard fade">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px">
+            <div style="width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;
+              display:grid;place-items:center;font-size:13px">☁</div>
+            <div class="mono" style="font-size:13px;font-weight:600">CF Tool</div>
+            <span class="tag" style="margin-left:auto">v2</span>
+          </div>
+          <div style="font-size:15px;font-weight:600;letter-spacing:-.02em">Đăng nhập</div>
+          <div class="mono" style="font-size:10.5px;color:var(--fg-3);margin:3px 0 18px">
+            Console quản trị Cloudflare</div>
+          <div class="fi"><label>Email</label><div class="ip fc">xuan@tienlen.dev</div></div>
+          <div class="fi"><label>Mật khẩu</label><div class="ip">••••••••••••</div></div>
+          <button class="btn pri" style="width:100%;height:32px;margin-top:6px">Đăng nhập →</button>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:16px;
+            font-family:var(--mono);font-size:10px;color:var(--fg-3)">
+            <span>Cần mã mời để đăng ký</span>
+            <span style="margin-left:auto;color:var(--accent);cursor:pointer">Đăng ký →</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMMAND PALETTE -->
+    <div class="ovl hide" id="ovl">
+      <div class="cmdk">
+        <div class="in">⌕ <span class="q">tien</span><span class="cur"></span>
+          <span class="kbd" style="margin-left:auto">esc</span></div>
+        <div class="grp">Domains · 4</div>
+        <div class="it on"><span class="ic">◈</span>tienlen.vn<span class="m">Business · 24 dns</span></div>
+        <div class="it"><span class="ic">◈</span>mail.tienlen.vn<span class="m">Free · 15 dns</span></div>
+        <div class="it"><span class="ic">◈</span>docs.tienlen.dev<span class="m">Free · 7 dns</span></div>
+        <div class="grp">Hành động</div>
+        <div class="it"><span class="ic">↻</span>Purge cache — tienlen.vn<span class="m">⌘⇧P</span></div>
+        <div class="it"><span class="ic">＋</span>Thêm DNS record<span class="m">⌘N</span></div>
+        <div class="it"><span class="ic">▤</span>Áp template…<span class="m">⌘T</span></div>
+        <div class="grp">Điều hướng</div>
+        <div class="it"><span class="ic">◷</span>Lịch sử<span class="m">g h</span></div>
+        <div class="it"><span class="ic">⌂</span>Tài khoản<span class="m">g a</span></div>
+        <div class="ft"><span>↑↓ chọn</span><span>↵ mở</span><span>⇥ hành động</span><span>esc đóng</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================ MOBILE ============================ -->
+<div id="mobile" class="m hide">
+  <div class="mstat"><span>9:41</span><span class="c">CF Tool</span><span>100%</span></div>
+
+  <!-- domains -->
+  <div class="mv" data-v="domains" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="mhd" style="position:relative">
+      <h1>Domains</h1>
+      <div class="sub">305 zones · 288 active · 11 pending</div>
+      <div class="fab">+</div>
+    </div>
+    <div class="msrch">⌕ Tìm domain, tag, IP…<span class="kbd" style="margin-left:auto">⌘K</span></div>
+    <div class="mseg">
+      <div class="s on">all<span class="n">305</span></div><div class="s">active<span class="n">288</span></div>
+      <div class="s">pending<span class="n">11</span></div><div class="s">ssl off<span class="n">6</span></div>
+      <div class="s">shop<span class="n">24</span></div><div class="s">cdn<span class="n">18</span></div>
+    </div>
+    <div class="mbody">
+      <div class="mrow"><div><div class="n">shop-abc.com</div><div class="meta"><i class="tag">Pro</i><i class="tag">ssl full</i>18 dns<i class="tag">shop</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">tienlen.vn</div><div class="meta"><i class="tag">Business</i><i class="tag">ssl strict</i>24 dns<i class="tag">core</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">blog.tuanle.dev</div><div class="meta"><i class="tag">Free</i><i class="tag">ssl flexible</i>9 dns<i class="tag">blog</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">api-gateway.io</div><div class="meta"><i class="tag">Pro</i><i class="tag">ssl strict</i>31 dns<i class="tag">api</i></div></div><span class="ch">›</span></div>
+      <div class="mrow" style="--a:var(--warn)"><div><div class="n">cdn-static.net</div><div class="meta"><i class="tag">Free</i><i class="tag warn">ssl off</i>4 dns<i class="tag">cdn</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">landing-q3.vn</div><div class="meta"><i class="tag">Free</i><i class="tag">ssl flexible</i>6 dns<i class="tag">mkt</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">checkout-abc.com</div><div class="meta"><i class="tag">Enterprise</i><i class="tag">ssl strict</i>27 dns<i class="tag">shop</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">img-proxy.dev</div><div class="meta"><i class="tag">Free</i><i class="tag">ssl full</i>11 dns<i class="tag">cdn</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">mail.tienlen.vn</div><div class="meta"><i class="tag">Free</i><i class="tag">ssl full</i>15 dns<i class="tag">mail</i></div></div><span class="ch">›</span></div>
+      <div class="mrow"><div><div class="n">status-page.io</div><div class="meta"><i class="tag">Free</i><i class="tag">ssl off</i>3 dns</div></div><span class="ch">›</span></div>
+    </div>
+  </div>
+
+  <!-- select mode -->
+  <div class="mv hide" data-v="select" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="display:flex;align-items:center;padding:9px 14px;border-bottom:1px solid var(--stroke)">
+      <span class="mono" style="font-size:13px;font-weight:600">Chọn domain</span>
+      <span class="mono" style="margin-left:auto;font-size:11px;color:var(--accent)">Chọn tất cả 305</span>
+    </div>
+    <div class="mbody">
+      <div class="mrow pick on"><span class="ck on">✓</span><div><div class="n">shop-abc.com</div><div class="meta">Pro · ssl full · 18 dns</div></div></div>
+      <div class="mrow pick on"><span class="ck on">✓</span><div><div class="n">tienlen.vn</div><div class="meta">Business · ssl strict · 24 dns</div></div></div>
+      <div class="mrow pick on"><span class="ck on">✓</span><div><div class="n">blog.tuanle.dev</div><div class="meta">Free · ssl flexible · 9 dns</div></div></div>
+      <div class="mrow pick"><span class="ck"></span><div><div class="n">api-gateway.io</div><div class="meta">Pro · ssl strict · 31 dns</div></div></div>
+      <div class="mrow pick"><span class="ck"></span><div><div class="n">cdn-static.net</div><div class="meta">Free · ssl off · 4 dns</div></div></div>
+      <div class="mrow pick"><span class="ck"></span><div><div class="n">landing-q3.vn</div><div class="meta">Free · ssl flexible · 6 dns</div></div></div>
+      <div class="mrow pick"><span class="ck"></span><div><div class="n">checkout-abc.com</div><div class="meta">Enterprise · ssl strict · 27 dns</div></div></div>
+    </div>
+    <div class="mbar">
+      <div class="hd"><span><b>3 domain</b> đã chọn</span><span class="x">Bỏ chọn</span></div>
+      <div class="r"><button class="btn pri">↻ Purge</button><button class="btn">⇄</button>
+        <button class="btn">⊘</button><button class="btn dgr">▢</button></div>
+    </div>
+  </div>
+
+  <!-- detail -->
+  <div class="mv hide" data-v="detail" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="mtop"><span class="bk">‹</span>
+      <div><div class="ti">tienlen.vn</div><div class="st">Business · active · 24 dns</div></div>
+      <span style="margin-left:auto;font-size:15px;color:var(--fg-2)">⋯</span></div>
+    <div class="mseg" style="padding-top:9px">
+      <div class="s">overview</div><div class="s on">dns<span class="n">24</span></div>
+      <div class="s">cache</div><div class="s">rules<span class="n">4</span></div>
+      <div class="s">security</div><div class="s">tags</div>
+    </div>
+    <div class="mbody">
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag info" style="margin-right:6px">A</span>@</div><div class="meta">203.0.113.10 · auto · <span style="color:var(--accent)">proxied</span></div></div><span class="ch">⋯</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag info" style="margin-right:6px">A</span>www</div><div class="meta">203.0.113.10 · auto · <span style="color:var(--accent)">proxied</span></div></div><span class="ch">⋯</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag" style="margin-right:6px">CNAME</span>cdn</div><div class="meta">cdn.tienlen.vn.cdn.cf · <span style="color:var(--accent)">proxied</span></div></div><span class="ch">⋯</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag warn" style="margin-right:6px">MX</span>@</div><div class="meta">aspmx.l.google.com · 3600 · prio 1</div></div><span class="ch">⋯</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag" style="margin-right:6px">TXT</span>_dmarc</div><div class="meta">v=DMARC1; p=quarantine…</div></div><span class="ch">⋯</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n"><span class="tag" style="margin-right:6px">AAAA</span>@</div><div class="meta">2606:4700:3033::6815 · <span style="color:var(--accent)">proxied</span></div></div><span class="ch">⋯</span></div>
+      <div style="padding:12px 14px"><button class="btn pri" style="width:100%;height:38px">+ Thêm DNS record</button></div>
+    </div>
+  </div>
+
+  <!-- cache -->
+  <div class="mv hide" data-v="cache" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="mtop"><span class="bk">‹</span>
+      <div><div class="ti">tienlen.vn</div><div class="st">cache</div></div></div>
+    <div class="mbody">
+      <div style="display:flex;border-bottom:1px solid var(--stroke)">
+        <div style="flex:1;padding:11px 14px;border-right:1px solid var(--stroke)">
+          <div class="mono" style="font-size:17px;font-weight:600">94.2%</div><div class="lbl">hit rate</div></div>
+        <div style="flex:1;padding:11px 14px;border-right:1px solid var(--stroke)">
+          <div class="mono" style="font-size:17px;font-weight:600">1.24TB</div><div class="lbl">saved</div></div>
+        <div style="flex:1;padding:11px 14px">
+          <div class="mono" style="font-size:17px;font-weight:600">42ms</div><div class="lbl">ttfb</div></div>
+      </div>
+      <div class="msec"><span class="lbl">Cấu hình</span></div>
+      <div class="mkv"><span>Cache level</span><span class="v"><span class="tag">standard</span>▾</span></div>
+      <div class="mkv"><span>Browser TTL</span><span class="v"><span class="tag">4 hours</span>▾</span></div>
+      <div class="mkv"><span>Tiered cache</span><span class="v"><span class="tag acc">smart</span>▾</span></div>
+      <div class="mkv"><span>Always Online</span><span class="v"><span class="swi on"></span></span></div>
+      <div class="mkv"><span>Development mode</span><span class="v"><span class="swi"></span></span></div>
+      <div class="msec"><span class="lbl">Purge</span></div>
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+        <button class="btn pri" style="height:38px">↻ Purge everything</button>
+        <button class="btn" style="height:38px">◫ Purge theo URL</button>
+        <button class="btn" style="height:38px">⊘ Purge theo tag</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- history -->
+  <div class="mv hide" data-v="history" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="mhd"><h1>Lịch sử</h1><div class="sub">48 thao tác · 7 ngày</div></div>
+    <div class="mseg"><div class="s on">all<span class="n">48</span></div><div class="s">ok<span class="n">44</span></div>
+      <div class="s">lỗi<span class="n">4</span></div><div class="s">rollback<span class="n">12</span></div></div>
+    <div class="mbody">
+      <div class="msec"><span class="lbl">Hôm nay</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">Bulk purge — 3 zones</div>
+        <div class="meta">15:41 · xuan · shop-abc, tienlen, blog</div></div><span class="tag ok">ok</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">Áp template base-dns — 12 zones</div>
+        <div class="meta">15:12 · xuan · 72 records</div></div><span class="tag ok">ok</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">DNS replace .9 → .10</div>
+        <div class="meta">14:03 · tuan · 28 records / 9 zones</div></div><span class="tag ok">ok</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">Tạo A cdn.promo-tet.vn</div>
+        <div class="meta">11:58 · CF 403 — thiếu quyền</div></div><span class="tag err">fail</span></div>
+      <div class="msec"><span class="lbl">Hôm qua</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">Xoá zone old-promo.vn</div>
+        <div class="meta">22:14 · xuan</div></div><span class="tag warn">destructive</span></div>
+      <div class="mrow nb"><div style="flex:1"><div class="n" style="font-weight:400;font-size:12px">Gắn tag prod — 34 zones</div>
+        <div class="meta">18:02 · tuan</div></div><span class="tag ok">ok</span></div>
+    </div>
+  </div>
+
+  <!-- more -->
+  <div class="mv hide" data-v="more" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="mhd"><h1>Thêm</h1><div class="sub">xuan@tienlen.dev · admin</div></div>
+    <div class="mbody">
+      <div class="msec"><span class="lbl">Cloudflare</span></div>
+      <div class="mrow nb"><span style="width:16px">⌂</span><div style="flex:1"><div class="n" style="font-weight:400;font-size:13px">Tài khoản</div><div class="meta">Main account · 305 zones</div></div><span class="ch">›</span></div>
+      <div class="mrow nb"><span style="width:16px">▤</span><div style="flex:1"><div class="n" style="font-weight:400;font-size:13px">Templates</div><div class="meta">12 mẫu</div></div><span class="ch">›</span></div>
+      <div class="msec"><span class="lbl">Quản trị</span></div>
+      <div class="mrow nb"><span style="width:16px">◉</span><div style="flex:1"><div class="n" style="font-weight:400;font-size:13px">Người dùng</div><div class="meta">9 tài khoản</div></div><span class="ch">›</span></div>
+      <div class="mrow nb"><span style="width:16px">✉</span><div style="flex:1"><div class="n" style="font-weight:400;font-size:13px">Lời mời</div><div class="meta">3 đang chờ</div></div><span class="ch">›</span></div>
+      <div class="mrow nb"><span style="width:16px">✎</span><div style="flex:1"><div class="n" style="font-weight:400;font-size:13px">Audit log</div><div class="meta">90 ngày</div></div><span class="ch">›</span></div>
+      <div class="msec"><span class="lbl">Cài đặt</span></div>
+      <div class="mkv"><span>Giao diện tối</span><span class="v"><span class="swi" id="mSwi"></span></span></div>
+      <div class="mkv"><span>Ngôn ngữ</span><span class="v"><span class="tag">Tiếng Việt</span>▾</span></div>
+      <div class="mkv"><span>Xác nhận thao tác nguy hiểm</span><span class="v"><span class="swi on"></span></span></div>
+      <div style="padding:14px"><button class="btn dgr" style="width:100%;height:38px">Đăng xuất</button></div>
+    </div>
+  </div>
+
+  <div class="mnav">
+    <div class="b on" data-mn="domains"><span class="ic">◈</span>Domains</div>
+    <div class="b" data-mn="select"><span class="ic">☑</span>Chọn</div>
+    <div class="b" data-mn="history"><span class="ic">◷</span>Lịch sử</div>
+    <div class="b" data-mn="more"><span class="ic">⋯</span>Thêm</div>
+  </div>
+</div>
+
+</div></div>
+
+<script>
+const dev=document.getElementById('dev'),D=document.getElementById('desktop'),M=document.getElementById('mobile');
+let mode='desktop',scr='domains',sel=true;
+const mMap={domains:'domains',detail:'detail',cache:'cache',rules:'detail',templates:'more',
+  history:'history',accounts:'more',users:'more',audit:'more',login:'domains'};
+
+function render(){
+  dev.className='dev '+mode;
+  D.classList.toggle('hide',mode!=='desktop');
+  M.classList.toggle('hide',mode!=='mobile');
+  document.querySelectorAll('.v').forEach(e=>e.classList.toggle('hide',e.dataset.v!==scr));
+  const mv=mMap[scr]||'domains';
+  document.querySelectorAll('.mv').forEach(e=>e.classList.toggle('hide',e.dataset.v!==mv));
+  document.querySelectorAll('.mnav .b').forEach(b=>b.classList.toggle('on',b.dataset.mn===mv));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.toggle('on',
+    n.dataset.nav===scr||(['detail','cache','rules'].includes(scr)&&n.dataset.nav==='domains')));
+  document.querySelectorAll('.abar').forEach(a=>a.classList.toggle('hide',!sel));
+  const cur=document.querySelector('.v:not(.hide)');
+  if(cur){cur.classList.remove('fade');void cur.offsetWidth;cur.classList.add('fade')}
+}
+bD.onclick=()=>{mode='desktop';bD.classList.add('on');bM.classList.remove('on');render()};
+bM.onclick=()=>{mode='mobile';bM.classList.add('on');bD.classList.remove('on');render()};
+bT.onclick=()=>{const d=document.documentElement.classList.toggle('dark');bT.textContent=d?'☀ light':'🌙 dark'};
+bS.onclick=()=>{sel=!sel;bS.classList.toggle('on',sel);render()};
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{
+  scr=b.dataset.s;document.querySelectorAll('[data-s]').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');render()});
+document.querySelectorAll('[data-nav]').forEach(n=>n.onclick=()=>{
+  const t=document.querySelector('[data-s="'+n.dataset.nav+'"]');if(t)t.click()});
+document.querySelectorAll('[data-mn]').forEach(n=>n.onclick=()=>{
+  document.querySelectorAll('.mv').forEach(e=>e.classList.toggle('hide',e.dataset.v!==n.dataset.mn));
+  document.querySelectorAll('.mnav .b').forEach(b=>b.classList.remove('on'));n.classList.add('on')});
+const ovl=document.getElementById('ovl');
+const toggleK=()=>ovl.classList.toggle('hide');
+bK.onclick=toggleK;qsBtn.onclick=toggleK;ovl.onclick=e=>{if(e.target===ovl)toggleK()};
+addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();toggleK()}
+  if(e.key==='Escape')ovl.classList.add('hide')});
+document.querySelectorAll('tbody tr').forEach(r=>r.onclick=e=>{
+  if(e.target.closest('.ck')){r.classList.toggle('sel');
+    const c=r.querySelector('.ck');c.className=r.classList.contains('sel')?'ck ring':'ck';
+    c.textContent=r.classList.contains('sel')?'◉':'';}});
+document.querySelectorAll('.mrow.pick').forEach(r=>r.onclick=()=>{
+  r.classList.toggle('on');const c=r.querySelector('.ck');
+  c.className=r.classList.contains('on')?'ck on':'ck';c.textContent=r.classList.contains('on')?'✓':''});
+document.querySelectorAll('.swi').forEach(s=>s.onclick=e=>{e.stopPropagation();s.classList.toggle('on')});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  t.parentElement.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on')});
+document.querySelectorAll('.mseg .s').forEach(t=>t.onclick=()=>{
+  t.parentElement.querySelectorAll('.s').forEach(x=>x.classList.remove('on'));t.classList.add('on')});
+render();
+</script>
+</body>
+</html>

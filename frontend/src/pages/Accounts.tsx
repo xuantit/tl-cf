@@ -98,9 +98,9 @@ function CapabilitiesSection({ accountId }: { accountId: string }) {
           {t('Could not evaluate token permissions')}
         </div>
       ) : (
-        <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-2 md:gap-x-10">
+        <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-2">
           {[entries.slice(0, half), entries.slice(half)].map((group, gi) => (
-            <div key={gi} className="px-4 py-[7px]">
+            <div key={gi} className={`p-[13px_16px] ${gi === 1 ? 'md:border-l md:border-l-stroke' : ''}`}>
               {group.map(([name, f]) => (
                 <KvRow
                   key={name}

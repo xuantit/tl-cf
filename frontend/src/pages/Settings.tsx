@@ -111,7 +111,7 @@ function ProfileTab({ me }: { me: Me }) {
         </Button>
       </div>
 
-      <div className="p-[13px_16px] md:border-l md:border-solid md:border-l-stroke">
+      <div className="p-[13px_16px] md:border-l md:border-l-stroke">
         <Lbl className="mb-[11px] block">{t('Change password')}</Lbl>
         <div className="mb-3">
           <FieldLabel>{t('Current password')}</FieldLabel>

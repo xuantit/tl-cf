@@ -521,6 +521,7 @@ export default function Tags() {
       {/* Delete tag */}
       <ConfirmDestructive
         open={deleteTag !== null}
+        severity="medium"
         title={t('Delete tag {{name}}?', { name: deleteTag?.name ?? '' })}
         explanation={t('The tag will be removed from all {{count}} domains that use it. Domains themselves are not affected.', {
           count: deleteTag?.domainCount ?? 0,

@@ -264,6 +264,7 @@ export default function DnsTab({ zoneId, zoneName }: { zoneId: string; zoneName?
 
       <ConfirmDestructive
         open={deleteIds.length > 0}
+        severity="medium"
         title={t('Delete {{count}} DNS record(s)?', { count: deleteIds.length })}
         items={deleteTargets.map((r) => ({
           key: r.id,

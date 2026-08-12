@@ -246,6 +246,7 @@ export default function CacheTab({
 
       <ConfirmDestructive
         open={purgeAllOpen}
+        severity="medium"
         title={t('Purge all cache for {{name}}?', { name: zoneName ?? zoneId })}
         explanation={t(
           'All cached content of this zone will be removed from the Cloudflare edge. The origin server will receive the full traffic until the cache is rebuilt.',
