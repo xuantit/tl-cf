@@ -5,7 +5,8 @@ import morgan from "morgan";
 
 import { env } from "./utils/env.js";
 import logger from "./utils/logger.js";
-import { auditMiddleware } from "./middleware/audit.js";
+import { auditMiddleware, redactSensitive } from "./middleware/audit.js";
+import { apiLimiter, authLimiter, cloudflareLimiter } from "./middleware/rateLimit.js";
 import { analyticsRouter } from "./routes/analytics.js";
 import { auditRouter } from "./routes/audit.js";
 import { authRouter } from "./routes/auth.js";
@@ -23,7 +24,18 @@ import { usersRouter } from "./routes/users.js";
 
 export const app = express();
 
-app.use(helmet());
+// Chạy sau Cloudflare Tunnel/nginx → req.ip phải lấy từ X-Forwarded-For,
+// nếu không mọi client sẽ chung 1 IP và rate limit + audit log vô nghĩa.
+// Chỉ tin đúng số hop cấu hình (không dùng `true` để tránh IP spoofing).
+app.set("trust proxy", env.TRUST_PROXY_HOPS);
+
+app.use(
+  helmet({
+    // API thuần JSON: chặn nhúng chéo và không cho trình duyệt đoán kiểu nội dung.
+    crossOriginResourcePolicy: { policy: "same-site" },
+    referrerPolicy: { policy: "no-referrer" },
+  }),
+);
 app.use(
   cors({
     origin: env.CORS_ORIGINS,
@@ -46,14 +58,18 @@ app.use(
 app.get("/health", (_req, res) => res.json({ status: "healthy" }));
 
 app.use(auditMiddleware);
+app.use("/api", apiLimiter);
+
+// Brute-force protection cho các endpoint không cần token.
+app.use(["/api/auth/login", "/api/auth/register", "/api/auth/setup"], authLimiter);
 
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/audit", auditRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/changes", changesRouter);
-app.use("/api/cf", cfRouter);
+app.use("/api/cf", cloudflareLimiter, cfRouter);
 app.use("/api/dashboard", dashboardRouter);
-app.use("/api/domains", domainsRouter);
+app.use("/api/domains", cloudflareLimiter, domainsRouter);
 app.use("/api/invites", invitesRouter);
 app.use("/api/jobs", jobsRouter);
 app.use("/api/rules", rulesRouter);
@@ -66,19 +82,24 @@ app.use("/api", domainsConfigRouter);
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const error = err as Error;
 
+  // KHÔNG log body/query thô: chúng chứa password, Global API Key, API token.
   logger.error("Unhandled error", {
     error: error.message,
     stack: error.stack,
-    url: req.url,
+    url: req.originalUrl.split("?")[0],
     method: req.method,
-    body: req.body,
-    query: req.query,
-    params: req.params,
+    body: redactSensitive(req.body),
+    query: redactSensitive(req.query),
+    params: redactSensitive(req.params),
+    userId: req.auth?.userId,
   });
 
+  // Chỉ lộ chi tiết lỗi khi bật DEBUG_ERRORS tường minh (mặc định an toàn kể cả
+  // khi NODE_ENV không được set).
+  const verbose = process.env.DEBUG_ERRORS === "true";
   res.status(500).json({
-    detail: process.env.NODE_ENV === "production" ? "Internal server error" : error.message,
-    ...(process.env.NODE_ENV !== "production" && { stack: error.stack }),
+    detail: verbose ? error.message : "Internal server error",
+    ...(verbose && { stack: error.stack }),
   });
 });
 

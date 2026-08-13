@@ -105,7 +105,7 @@ templatesRouter.put("/:id", async (req, res) => {
         description: body.description,
         recordsJson: JSON.stringify(body.records),
       })
-      .where(eq(dnsTemplates.id, req.params.id))
+      .where(and(eq(dnsTemplates.id, req.params.id), eq(dnsTemplates.userId, auth.userId)))
       .returning();
     res.json(serializeTemplate(template));
   } catch (error: any) {
@@ -122,7 +122,9 @@ templatesRouter.delete("/:id", async (req, res) => {
     if (!existing) {
       return res.status(404).json({ detail: "Template not found" });
     }
-    await db.delete(dnsTemplates).where(eq(dnsTemplates.id, req.params.id));
+    await db
+      .delete(dnsTemplates)
+      .where(and(eq(dnsTemplates.id, req.params.id), eq(dnsTemplates.userId, auth.userId)));
     res.status(204).send();
   } catch (error: any) {
     res.status(400).json({ detail: error.message || "Failed to delete template" });

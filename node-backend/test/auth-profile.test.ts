@@ -116,7 +116,8 @@ describe("auth profile", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ currentPassword: password, newPassword });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    expect(res.body.ok).toBe(true);
+    expect(typeof res.body.revokedSessions).toBe("number");
 
     const oldLogin = await login(password);
     expect(oldLogin.status).toBe(401);

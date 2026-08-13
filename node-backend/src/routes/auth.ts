@@ -8,6 +8,7 @@ import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
 
 import { findUserByEmail, createUser } from "../models/userJson.js";
 import { requireAuth } from "../middleware/auth.js";
+import { sensitiveLimiter } from "../middleware/rateLimit.js";
 import { db } from "../services/db.js";
 import { inviteCodes, sessions, users } from "../db/schema.js";
 import { env } from "../utils/env.js";
@@ -210,7 +211,7 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
   });
 });
 
-authRouter.post("/change-password", requireAuth, async (req, res) => {
+authRouter.post("/change-password", requireAuth, sensitiveLimiter, async (req, res) => {
   const bodySchema = z.object({
     currentPassword: z.string().min(1, "Current password is required"),
     newPassword: z.string().min(8, "Mật khẩu mới phải có ít nhất 8 ký tự"),
@@ -235,8 +236,22 @@ authRouter.post("/change-password", requireAuth, async (req, res) => {
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
   await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
 
-  logger.info("User changed password", { userId: user.id });
-  res.json({ ok: true });
+  // Đổi mật khẩu phải đá văng mọi phiên khác: nếu token cũ bị đánh cắp,
+  // nó vẫn sống 7 ngày nếu không revoke.
+  const revoked = await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.userId, user.id),
+        isNull(sessions.revokedAt),
+        ...(req.auth!.jti ? [ne(sessions.jti, req.auth!.jti)] : []),
+      ),
+    )
+    .returning({ id: sessions.id });
+
+  logger.info("User changed password", { userId: user.id, revokedSessions: revoked.length });
+  res.json({ ok: true, revokedSessions: revoked.length });
 });
 
 authRouter.get("/sessions", requireAuth, async (req, res) => {

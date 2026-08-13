@@ -6,8 +6,9 @@ import logger from "../utils/logger.js";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-// Field nhạy cảm không bao giờ được lưu vào audit log
-const SENSITIVE_KEYS = /password|passwordhash|apikey|api_key|apitoken|api_token|globalapikey|credential|secret|authorization/i;
+// Field nhạy cảm không bao giờ được lưu vào audit log / application log
+const SENSITIVE_KEYS =
+  /password|passwordhash|apikey|api_key|apitoken|api_token|globalapikey|credential|secret|authorization|token|jwt|cookie/i;
 
 const MAX_META_LENGTH = 2000;
 
@@ -27,6 +28,11 @@ function sanitize(value: unknown, depth = 0): unknown {
   }
   if (typeof value === "string" && value.length > 200) return value.slice(0, 200) + "…";
   return value;
+}
+
+/** Dùng chung cho error handler: che mọi field nhạy cảm trước khi ghi log. */
+export function redactSensitive(value: unknown): unknown {
+  return sanitize(value);
 }
 
 /**

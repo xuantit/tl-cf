@@ -410,6 +410,35 @@ cfRouter.post("/accounts", async (req, res) => {
   }
 });
 
+// LƯU Ý: phải đứng TRƯỚC "/accounts/:id", nếu không Express sẽ hiểu "export" là :id.
+cfRouter.get("/accounts/export", async (req, res) => {
+  try {
+    const auth = req.auth as AuthUser;
+    if (auth.role !== "admin") {
+      return res.status(403).json({ detail: "Admin role required" });
+    }
+    const config = await configService.loadConfig();
+
+    // Mặc định KHÔNG xuất bcrypt hash và ciphertext credential Cloudflare:
+    // một token admin bị đánh cắp sẽ dump toàn bộ bí mật của mọi user.
+    // Bản backup đầy đủ phải yêu cầu tường minh ?includeSecrets=true.
+    const includeSecrets = req.query.includeSecrets === "true";
+    if (!includeSecrets) {
+      return res.json({
+        ...config,
+        users: config.users.map((u) => ({ ...u, passwordHash: "[REDACTED]" })),
+        accounts: config.accounts.map((a) => ({ ...a, globalApiKeyEncrypted: "[REDACTED]" })),
+      });
+    }
+
+    logger.warn("Full config export WITH secrets", { adminId: auth.userId, ip: req.ip });
+    res.json(config);
+  } catch (error: any) {
+    logger.error("Failed to export config", { error: error.message });
+    res.status(500).json({ detail: error.message || "Failed to export config" });
+  }
+});
+
 cfRouter.get("/accounts/:id", async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
@@ -510,7 +539,7 @@ cfRouter.delete("/accounts/:id", async (req, res) => {
   }
 });
 
-// ========== Import/Export Endpoints (admin only — they touch ALL users' data) ==========
+// ========== Import Endpoint (admin only — ghi đè DỮ LIỆU CỦA MỌI USER) ==========
 
 cfRouter.post("/accounts/import", async (req, res) => {
   try {
@@ -537,19 +566,5 @@ cfRouter.post("/accounts/import", async (req, res) => {
   } catch (error: any) {
     logger.error("Failed to import config", { error: error.message });
     res.status(400).json({ detail: error.message || "Failed to import config" });
-  }
-});
-
-cfRouter.get("/accounts/export", async (req, res) => {
-  try {
-    const auth = req.auth as AuthUser;
-    if (auth.role !== "admin") {
-      return res.status(403).json({ detail: "Admin role required" });
-    }
-    const config = await configService.loadConfig();
-    res.json(config);
-  } catch (error: any) {
-    logger.error("Failed to export config", { error: error.message });
-    res.status(500).json({ detail: error.message || "Failed to export config" });
   }
 });
