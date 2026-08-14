@@ -1382,7 +1382,7 @@ export default function WorkersPages() {
   }
 
   return (
-    <div className="fade-in">
+    <div className="fade-in p-[clamp(12px,3vw,24px)]">
       <PageHeader
         title={t('Workers & Pages')}
         description={t('Manage Workers scripts, routes and Pages deployments')}

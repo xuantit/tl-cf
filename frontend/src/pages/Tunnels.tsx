@@ -601,7 +601,7 @@ export default function Tunnels() {
   ]
 
   return (
-    <div className="fade-in">
+    <div className="fade-in p-[clamp(12px,3vw,24px)]">
       <PageHeader
         title={t('Tunnels')}
         crumb={`${tunnels.length}`}

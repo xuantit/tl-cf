@@ -47,5 +47,14 @@ module.exports = {
       interpreter: "none",
       autorestart: true,
     },
+    {
+      // Auto-deploy: poll origin/main, có commit mới → pull + build + restart.
+      // Sau khi sửa chính file watcher này, phải `pm2 restart cf-deploy` thủ công.
+      name: "cf-deploy",
+      script: "scripts/deploy-watcher.mjs",
+      exec_mode: "fork",
+      instances: 1,
+      autorestart: true,
+    },
   ],
 };
