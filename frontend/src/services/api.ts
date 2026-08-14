@@ -36,6 +36,9 @@ const ACCOUNT_SCOPED = [
   '/analytics',
   '/dashboard',
   '/tags',
+  '/tunnels',
+  '/workers',
+  '/pages',
 ]
 
 api.interceptors.request.use((config) => {

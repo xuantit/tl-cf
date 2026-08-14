@@ -77,10 +77,9 @@
 @theme {
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
     'Helvetica Neue', sans-serif;
-  /* Unified to the sans stack (mono was hard to read); keep the token so
-     existing font-mono classes and var(--font-mono) references stay valid. */
-  --font-mono: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
-    'Helvetica Neue', sans-serif;
+  /* Khớp mockup 3.html: JetBrains Mono cho nhãn/giá trị kỹ thuật (zone, IP, expression…) */
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
 
   --animate-shimmer: shimmer 1.3s infinite;
 

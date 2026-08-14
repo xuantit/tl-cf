@@ -5,6 +5,7 @@ import { message } from '../../lib/antdApp'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import ConfirmDestructive from '../../components/ConfirmDestructive'
+import RulesetRulesPanel from '../../components/rules/RulesetRulesPanel'
 import { KvRow, Lbl, StatStrip } from '../../components/ui'
 import { api, apiErrorCode, apiErrorDetail } from '../../services/api'
 import type { CacheConfig, TieredCacheSettings, ZoneAnalytics } from '../../types/domain'
@@ -242,6 +243,11 @@ export default function CacheTab({
             <span className="ml-auto font-mono text-[11px] text-fg-3">{t('max 30 URLs per request')}</span>
           </div>
         </div>
+      </div>
+
+      {/* Cache Rules sống cùng chỗ với các thiết lập cache khác của zone. */}
+      <div className="mt-6">
+        <RulesetRulesPanel zoneId={zoneId} kind="cache" zoneName={zoneName} />
       </div>
 
       <ConfirmDestructive

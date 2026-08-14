@@ -47,6 +47,8 @@ export default function More() {
       <MoreRow to="/templates" icon="▤" label="Templates" />
       <MoreRow to="/tags" icon="⊘" label="Tags" />
       <MoreRow to="/analytics" icon="◱" label="Analytics" />
+      <MoreRow to="/workers" icon="ƒ" label={t('Workers & Pages')} />
+      <MoreRow to="/tunnels" icon="⇌" label="Tunnels" />
 
       {isAdmin && (
         <>

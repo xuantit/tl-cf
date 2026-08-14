@@ -17,10 +17,13 @@ import { domainsRouter } from "./routes/domains.js";
 import { domainsConfigRouter } from "./routes/domains-config.js";
 import { invitesRouter } from "./routes/invites.js";
 import { jobsRouter } from "./routes/jobs.js";
+import { pagesRouter } from "./routes/pages.js";
 import { rulesRouter } from "./routes/rules.js";
 import { tagsRouter } from "./routes/tags.js";
 import { templatesRouter } from "./routes/templates.js";
+import { tunnelsRouter } from "./routes/tunnels.js";
 import { usersRouter } from "./routes/users.js";
+import { workersRouter } from "./routes/workers.js";
 
 export const app = express();
 
@@ -72,10 +75,13 @@ app.use("/api/dashboard", dashboardRouter);
 app.use("/api/domains", cloudflareLimiter, domainsRouter);
 app.use("/api/invites", invitesRouter);
 app.use("/api/jobs", jobsRouter);
+app.use("/api/pages", cloudflareLimiter, pagesRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/tags", tagsRouter);
 app.use("/api/templates", templatesRouter);
+app.use("/api/tunnels", cloudflareLimiter, tunnelsRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/workers", cloudflareLimiter, workersRouter);
 app.use("/api", domainsConfigRouter);
 
 // Error handler với logging chi tiết

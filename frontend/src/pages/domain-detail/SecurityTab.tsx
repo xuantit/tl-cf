@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
-import { Button, Input, Modal, Popconfirm, Select, Switch, Table } from 'antd'
+import { Button, Input, Popconfirm, Select, Switch, Table } from 'antd'
 import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
-import { Banner, EmptyState, KvRow, Lbl, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
+import { Banner, DetailPanel, EmptyState, KvRow, Lbl, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
 import { api, apiErrorDetail } from '../../services/api'
 import type { SecuritySettings, SslSettings } from '../../types/domain'
 
@@ -65,14 +65,19 @@ const MODE_TAG: Record<AccessRuleMode, { variant: 'ok' | 'warn' | 'err'; label: 
   whitelist: { variant: 'ok', label: 'allow' },
 }
 
-function AddAccessRuleModal({
+function AccessRulePanel({
   open,
   zoneId,
+  editing,
   onClose,
+  onDelete,
 }: {
   open: boolean
   zoneId: string
+  /** Rule đang sửa — null = tạo mới. CF chỉ cho sửa mode/notes, value bị khoá. */
+  editing?: AccessRule | null
   onClose: () => void
+  onDelete?: (rule: AccessRule) => void
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -80,45 +85,92 @@ function AddAccessRuleModal({
   const [target, setTarget] = useState<AccessRuleTarget>('ip')
   const [value, setValue] = useState('')
   const [notes, setNotes] = useState('')
+  // Đồng bộ form khi đổi rule đang sửa (panel luôn mounted)
+  const [syncedId, setSyncedId] = useState<string | null>(null)
+  const editingId = editing?.id ?? null
+  if (syncedId !== editingId) {
+    setSyncedId(editingId)
+    setMode(editing?.mode ?? 'block')
+    setTarget(editing?.configuration.target ?? 'ip')
+    setValue(editing?.configuration.value ?? '')
+    setNotes(editing?.notes ?? '')
+  }
 
   const valid = isAccessRuleValueValid(target, value)
   const showInvalid = value.trim() !== '' && !valid
 
-  const createRule = useMutation({
+  const reset = () => {
+    setSyncedId(null)
+    setMode('block')
+    setTarget('ip')
+    setValue('')
+    setNotes('')
+  }
+
+  const close = () => {
+    reset()
+    onClose()
+  }
+
+  const saveRule = useMutation({
     mutationFn: async () =>
-      (
-        await api.post(`/domains/${zoneId}/access-rules`, {
-          mode,
-          target,
-          value: value.trim(),
-          ...(notes.trim() ? { notes: notes.trim() } : {}),
-        })
-      ).data,
+      editing
+        ? (
+            await api.patch(`/domains/${zoneId}/access-rules/${editing.id}`, {
+              mode,
+              notes: notes.trim(),
+            })
+          ).data
+        : (
+            await api.post(`/domains/${zoneId}/access-rules`, {
+              mode,
+              target,
+              value: value.trim(),
+              ...(notes.trim() ? { notes: notes.trim() } : {}),
+            })
+          ).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['access-rules', zoneId] })
-      message.success(t('Access rule created'))
-      onClose()
+      message.success(editing ? t('Access rule updated') : t('Access rule created'))
+      close()
     },
     onError: (error) => {
-      message.error(apiErrorDetail(error) || t('Could not create the access rule'))
+      message.error(apiErrorDetail(error) || t('Could not save the access rule'))
     },
   })
 
   return (
-    <Modal
-      title={t('Add access rule')}
+    <DetailPanel
       open={open}
-      onCancel={onClose}
-      destroyOnHidden
-      okText={t('Add rule')}
-      okButtonProps={{ disabled: !valid, loading: createRule.isPending }}
-      onOk={() => createRule.mutate()}
-      afterClose={() => {
-        setMode('block')
-        setTarget('ip')
-        setValue('')
-        setNotes('')
-      }}
+      title={editing ? t('Edit access rule') : t('Add access rule')}
+      onClose={close}
+      footer={
+        <>
+          {editing && onDelete && (
+            <Button
+              danger
+              onClick={() => {
+                const rule = editing
+                close()
+                onDelete(rule)
+              }}
+            >
+              {t('Delete')}
+            </Button>
+          )}
+          <span className="ml-auto flex gap-2">
+            <Button onClick={close}>{t('Cancel')}</Button>
+            <Button
+              type="primary"
+              disabled={!editing && !valid}
+              loading={saveRule.isPending}
+              onClick={() => saveRule.mutate()}
+            >
+              {editing ? t('Save') : t('Add rule')}
+            </Button>
+          </span>
+        </>
+      }
     >
       <div className="flex flex-col gap-3 py-1">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -143,6 +195,7 @@ function AddAccessRuleModal({
             <Select<AccessRuleTarget>
               className="w-full"
               value={target}
+              disabled={!!editing}
               onChange={(next) => {
                 setTarget(next)
                 setValue('')
@@ -165,12 +218,19 @@ function AddAccessRuleModal({
             status={showInvalid ? 'error' : undefined}
             className="font-mono"
             aria-label={t('Value')}
+            disabled={!!editing}
             onChange={(e) => setValue(e.target.value)}
           />
-          {showInvalid && (
-            <div className="mt-1 font-mono text-[11px] text-danger">
-              ✕ {t('Invalid value for this type')}
+          {editing ? (
+            <div className="mt-1 font-mono text-[11px] text-fg-3">
+              {t('Cloudflare only allows changing the action and notes')}
             </div>
+          ) : (
+            showInvalid && (
+              <div className="mt-1 font-mono text-[11px] text-danger">
+                ✕ {t('Invalid value for this type')}
+              </div>
+            )
           )}
         </div>
         <div>
@@ -184,14 +244,15 @@ function AddAccessRuleModal({
           />
         </div>
       </div>
-    </Modal>
+    </DetailPanel>
   )
 }
 
 function AccessRulesSection({ zoneId }: { zoneId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [addOpen, setAddOpen] = useState(false)
+  // 'add' | rule đang sửa | null (đóng)
+  const [panelState, setPanelState] = useState<'add' | AccessRule | null>(null)
 
   const { data, isLoading, isError, error, refetch } = useQuery<{ rules: AccessRule[] }>({
     queryKey: ['access-rules', zoneId],
@@ -265,7 +326,7 @@ function AccessRulesSection({ zoneId }: { zoneId: string }) {
       <SectionHeader
         title={`IP Access Rules · ${rules.length}`}
         actions={
-          <Button size="small" onClick={() => setAddOpen(true)} disabled={permissionError}>
+          <Button size="small" onClick={() => setPanelState('add')} disabled={permissionError}>
             + {t('Add rule')}
           </Button>
         }
@@ -291,24 +352,51 @@ function AccessRulesSection({ zoneId }: { zoneId: string }) {
             <SkeletonLine key={i} width={`${82 - i * 12}%`} />
           ))}
         </div>
-      ) : rules.length === 0 ? (
-        <EmptyState
-          icon="⛨"
-          title={t('No access rules')}
-          desc={t('Block, challenge or allow visitors by IP, CIDR, country or ASN')}
-          className="!py-[28px]"
-        />
       ) : (
-        <Table<AccessRule>
-          dataSource={rules}
-          columns={columns}
-          rowKey="id"
-          pagination={false}
-          size="small"
-          scroll={{ x: 'max-content' }}
-        />
+        <div className="flex">
+          <div className="min-w-0 flex-1">
+            {rules.length === 0 ? (
+              <EmptyState
+                icon="⛨"
+                title={t('No access rules')}
+                desc={t('Block, challenge or allow visitors by IP, CIDR, country or ASN')}
+                className="!py-[28px]"
+              />
+            ) : (
+              <Table<AccessRule>
+                dataSource={rules}
+                columns={columns}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                onRow={(rule) => ({
+                  // Click cả dòng để sửa (đồng bộ với các bảng khác); bỏ qua nút/menu.
+                  onClick: (event) => {
+                    const target = event.target as HTMLElement
+                    if (target.closest('button, .ant-popover')) return
+                    setPanelState(rule)
+                  },
+                  style: { cursor: 'pointer' },
+                })}
+                rowClassName={(rule) =>
+                  panelState !== null && panelState !== 'add' && panelState.id === rule.id
+                    ? 'bg-bg-sel'
+                    : ''
+                }
+                scroll={{ x: 'max-content' }}
+              />
+            )}
+          </div>
+          {/* Panel trượt bên phải thay cho modal */}
+          <AccessRulePanel
+            open={panelState !== null}
+            zoneId={zoneId}
+            editing={panelState !== null && panelState !== 'add' ? panelState : null}
+            onClose={() => setPanelState(null)}
+            onDelete={(rule) => deleteRule.mutate(rule.id)}
+          />
+        </div>
       )}
-      <AddAccessRuleModal open={addOpen} zoneId={zoneId} onClose={() => setAddOpen(false)} />
     </div>
   )
 }

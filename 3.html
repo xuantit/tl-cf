@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tl-cf — Redesign demo: Overview blocks → Focus mode → Side panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff; --bg-app:#f6f6f7; --bg-side:#fbfbfc; --bg-hover:#f7f7f8; --bg-sel:#fff7ef;
+  --stroke:#e7e7ea; --stroke-2:#f0f0f2;
+  --fg:#101114; --fg-2:#4d525a; --fg-3:#767c86;
+  --accent:#f6821f; --accent-hover:#e4720f; --accent-soft:#fff2e5;
+  --ok:#12a150; --warn:#f5a524; --danger:#e5484d; --info:#0070f3; --off:#9aa0a6;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:Inter,-apple-system,system-ui,sans-serif;
+  --r-xs:4px; --r-sm:6px; --r-md:8px; --r-lg:12px;
+  --ease:cubic-bezier(.16,1,.3,1); --d1:120ms; --d2:220ms;
+  --rail-w:196px; --panel-w:440px;
+}
+html.dark{
+  --bg:#0d0e11; --bg-app:#08090b; --bg-side:#0a0b0e; --bg-hover:#15171b; --bg-sel:#1e1508;
+  --stroke:#22242a; --stroke-2:#1a1c21;
+  --fg:#f0f1f3; --fg-2:#aab0ba; --fg-3:#7f8591; --accent-soft:#2a1a09;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg-app); color:var(--fg);
+  font:14px/1.5 var(--sans); -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+code,.mono{font-family:var(--mono)}
+
+/* ── Top bar ─────────────────────────────────────────────── */
+.topbar{
+  height:46px; display:flex; align-items:center; gap:12px; padding:0 16px;
+  background:var(--bg); border-bottom:1px solid var(--stroke); position:sticky; top:0; z-index:20;
+}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:-.01em}
+.brand .logo{width:18px;height:18px;border-radius:5px;background:var(--accent);display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
+.crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg-3)}
+.crumb a{color:var(--fg-3);text-decoration:none}
+.crumb a:hover{color:var(--fg)}
+.crumb .zone{color:var(--fg);font-weight:600;font-family:var(--mono);font-size:13.5px}
+.spacer{margin-left:auto}
+.tag{
+  display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:var(--r-xs);
+  border:1px solid var(--stroke); background:var(--bg-side);
+  font-size:11px;font-family:var(--mono);color:var(--fg-2);white-space:nowrap
+}
+.tag.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 30%,transparent);background:color-mix(in srgb,var(--ok) 8%,transparent)}
+.tag.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.tag.off{color:var(--fg-3)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--off);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--danger)}
+.iconbtn{width:28px;height:28px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--fg-3)}
+.iconbtn:hover{background:var(--bg-hover);color:var(--fg)}
+
+/* ── App shell ───────────────────────────────────────────── */
+.app{display:flex;height:calc(100vh - 46px);overflow:hidden}
+
+/* Rail: các tab chức năng chuyển thành sidebar khi vào focus mode */
+.rail{
+  width:0; flex:none; background:var(--bg-side); border-right:1px solid var(--stroke);
+  overflow:hidden; transition:width var(--d2) var(--ease);
+}
+body.focus .rail{width:var(--rail-w)}
+.rail-inner{width:var(--rail-w);padding:10px 8px;display:flex;flex-direction:column;gap:2px;height:100%}
+.rail-lbl{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);padding:8px 8px 4px;font-family:var(--mono)}
+.rail-item{
+  display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r-sm);
+  color:var(--fg-2);font-size:13px;text-align:left;width:100%
+}
+.rail-item:hover{background:var(--bg-hover);color:var(--fg)}
+.rail-item.active{background:var(--bg-sel);color:var(--fg);font-weight:600;box-shadow:inset 2px 0 0 var(--accent)}
+.rail-item .ic{width:16px;text-align:center;font-size:13px;opacity:.85}
+.rail-item .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--fg-3)}
+.rail-foot{margin-top:auto;border-top:1px solid var(--stroke);padding-top:8px}
+
+/* Stage */
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.view{flex:1;min-height:0;overflow:auto}
+.view[hidden]{display:none}
+
+/* ── OVERVIEW: các khối chức năng ────────────────────────── */
+.ov-head{padding:20px clamp(14px,3vw,26px) 4px}
+.ov-title{font-size:19px;font-weight:650;letter-spacing:-.02em;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ov-sub{color:var(--fg-3);font-size:12.5px;margin-top:3px}
+.kpis{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 2px}
+.kpi{
+  background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-md);
+  padding:9px 13px;min-width:132px
+}
+.kpi .k{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);font-family:var(--mono)}
+.kpi .v{font-size:17px;font-weight:650;letter-spacing:-.02em;margin-top:2px}
+.kpi .v small{font-size:11px;color:var(--fg-3);font-weight:500}
+
+.grid{
+  padding:14px clamp(14px,3vw,26px) 28px;
+  display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fill,minmax(310px,1fr));
+}
+.card{
+  background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-lg);
+  padding:14px 15px 12px;text-align:left;width:100%;
+  transition:border-color var(--d1),box-shadow var(--d1),transform var(--d1);
+  display:flex;flex-direction:column;gap:11px;position:relative;overflow:hidden
+}
+.card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--stroke));box-shadow:0 6px 22px -14px rgba(0,0,0,.35);transform:translateY(-1px)}
+.card:hover .go{opacity:1;transform:translateX(0)}
+.card-top{display:flex;align-items:center;gap:9px}
+.card-ic{
+  width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none;
+  background:var(--accent-soft);color:var(--accent);font-size:14px
+}
+.card-h{font-weight:650;letter-spacing:-.01em;font-size:14.5px}
+.card-sub{font-size:11.5px;color:var(--fg-3);font-family:var(--mono);margin-top:1px}
+.go{margin-left:auto;color:var(--fg-3);opacity:0;transform:translateX(-4px);transition:all var(--d1) var(--ease)}
+.rows{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--stroke-2);padding-top:2px}
+.row{display:flex;align-items:center;gap:10px;padding:5.5px 0;border-bottom:1px solid var(--stroke-2);font-size:12.5px}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--fg-3);min-width:104px;font-size:12px}
+.row .v{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--fg);text-align:right;
+  max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* ── FOCUS MODE ──────────────────────────────────────────── */
+.fx{display:flex;flex-direction:column;height:100%}
+.fx-head{
+  display:flex;align-items:center;gap:10px;padding:11px clamp(12px,2vw,20px);
+  background:var(--bg);border-bottom:1px solid var(--stroke);flex:none
+}
+.back{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-3);padding:4px 8px;border-radius:var(--r-sm)}
+.back:hover{background:var(--bg-hover);color:var(--fg)}
+.fx-title{font-weight:650;letter-spacing:-.01em;font-size:15px;display:flex;align-items:center;gap:8px}
+.btn{
+  height:28px;padding:0 11px;border-radius:var(--r-sm);border:1px solid var(--stroke);
+  background:var(--bg);color:var(--fg-2);font-size:12.5px;display:inline-flex;align-items:center;gap:6px
+}
+.btn:hover{background:var(--bg-hover);color:var(--fg)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:550}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,transparent)}
+
+.fx-body{flex:1;min-height:0;display:flex}
+.list{flex:1;min-width:0;overflow:auto;padding:0 0 24px}
+.sec{
+  display:flex;align-items:center;gap:9px;padding:9px clamp(12px,2vw,20px);
+  background:var(--bg-side);border-bottom:1px solid var(--stroke);position:sticky;top:0;z-index:2
+}
+.sec .t{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--fg-3);font-family:var(--mono)}
+.sec .r{margin-left:auto;display:flex;gap:6px}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{
+  text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--fg-3);
+  font-family:var(--mono);font-weight:500;padding:9px clamp(12px,2vw,20px);border-bottom:1px solid var(--stroke)
+}
+td{padding:9px clamp(12px,2vw,20px);border-bottom:1px solid var(--stroke-2);font-size:12.5px;vertical-align:middle;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr.item{cursor:pointer}
+tr.item:hover td{background:var(--bg-hover)}
+tr.item.sel td{background:var(--bg-sel)}
+tr.item.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+td .name{font-weight:550}
+td code{font-size:11.5px;color:var(--fg-2)}
+.mini{font-size:11px;color:var(--fg-3);font-family:var(--mono)}
+
+/* Khi panel mở, danh sách nhường chỗ: ẩn cột phụ thay vì cắt hết mọi cột */
+body.panel-open .list th:nth-child(4),
+body.panel-open .list td:nth-child(4),
+body.panel-open .list th:nth-child(5),
+body.panel-open .list td:nth-child(5){display:none}
+
+/* Panel bên phải thay cho modal */
+.panel{
+  width:0;flex:none;background:var(--bg);border-left:1px solid var(--stroke);
+  overflow:hidden;transition:width var(--d2) var(--ease);display:flex;flex-direction:column
+}
+body.panel-open .panel{width:min(var(--panel-w),46vw)}
+.panel-inner{width:min(var(--panel-w),46vw);display:flex;flex-direction:column;height:100%}
+.panel-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--stroke);flex:none}
+.panel-head .t{font-weight:650;font-size:13.5px}
+.panel-scroll{flex:1;overflow:auto;padding:14px}
+.panel-foot{display:flex;gap:8px;padding:11px 14px;border-top:1px solid var(--stroke);flex:none;background:var(--bg-side)}
+
+.f{margin-bottom:13px}
+.f>label{display:block;font-size:11.5px;color:var(--fg-2);margin-bottom:5px;font-weight:550}
+.f .hint{font-size:11px;color:var(--fg-3);margin-top:4px}
+input[type=text],select,textarea{
+  width:100%;background:var(--bg);border:1px solid var(--stroke);border-radius:var(--r-sm);
+  padding:6px 9px;color:var(--fg);font:13px var(--sans);outline:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+textarea{font-family:var(--mono);font-size:12px;resize:vertical}
+.seg{display:flex;gap:0;border:1px solid var(--stroke);border-radius:var(--r-sm);overflow:hidden;width:fit-content}
+.seg button{padding:5px 11px;font-size:12px;color:var(--fg-2);border-right:1px solid var(--stroke)}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--fg);color:var(--bg);font-weight:550}
+.expr-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.expr-row select{width:auto;min-width:114px;flex:none;font-size:12px;padding:5px 7px}
+.expr-row input{flex:1;min-width:110px;font-size:12px;padding:5px 8px}
+.preview{
+  background:var(--bg-side);border:1px solid var(--stroke);border-radius:var(--r-sm);
+  padding:8px 10px;font-family:var(--mono);font-size:11.5px;color:var(--fg-2);word-break:break-all;line-height:1.6
+}
+.preview b{color:var(--accent);font-weight:600}
+.counter{font-size:10.5px;color:var(--fg-3);font-family:var(--mono);margin-top:4px;display:flex;gap:8px}
+.grp{border:1px solid var(--stroke);border-radius:var(--r-md);padding:11px 12px;margin-bottom:12px;background:var(--bg-side)}
+.grp>.gt{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);font-family:var(--mono);margin-bottom:9px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.link{color:var(--info);font-size:11.5px;cursor:pointer}
+.link:hover{text-decoration:underline}
+
+@media (max-width:1100px){
+  body.panel-open .panel{position:fixed;right:0;top:46px;bottom:0;width:min(420px,92vw);z-index:30;box-shadow:-18px 0 40px -24px rgba(0,0,0,.5)}
+  .panel-inner{width:min(420px,92vw)}
+}
+@media (max-width:720px){
+  body.focus .rail{width:0}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo">t</span> tl-cf</div>
+  <div class="crumb">
+    <a href="#" onclick="showOverview();return false">Domains</a> ›
+    <span class="zone">mmthui.xyz</span>
+    <span class="tag ok"><span class="dot ok"></span> active</span>
+    <span class="tag">Free</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="iconbtn" title="Đổi theme" onclick="document.documentElement.classList.toggle('dark')">◐</button>
+</header>
+
+<div class="app">
+  <!-- Sidebar: tab chức năng bị đẩy sang đây khi vào focus mode -->
+  <aside class="rail">
+    <div class="rail-inner">
+      <div class="rail-lbl">mmthui.xyz</div>
+      <button class="rail-item" onclick="showOverview()"><span class="ic">▦</span> Overview</button>
+      <div class="rail-lbl">Chức năng</div>
+      <div id="railItems"></div>
+      <div class="rail-foot">
+        <button class="rail-item" onclick="showOverview()"><span class="ic">←</span> Về Overview</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <!-- ── VIEW 1: OVERVIEW = các khối chức năng ── -->
+    <section class="view" id="viewOverview">
+      <div class="ov-head">
+        <div class="ov-title">mmthui.xyz <span class="tag ok"><span class="dot ok"></span> active</span> <span class="tag">Free</span></div>
+        <div class="ov-sub">Cập nhật 2 phút trước · 4 bản ghi DNS · 5 rules đang bật · bấm vào một khối để mở toàn màn hình</div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Requests 24h</div><div class="v">1.24M</div></div>
+          <div class="kpi"><div class="k">Cache hit</div><div class="v">87.4<small>%</small></div></div>
+          <div class="kpi"><div class="k">Bandwidth</div><div class="v">42.8<small>GB</small></div></div>
+          <div class="kpi"><div class="k">Threats</div><div class="v">1,208</div></div>
+        </div>
+      </div>
+      <div class="grid" id="cards"></div>
+    </section>
+
+    <!-- ── VIEW 2: FOCUS = 1 khối chiếm cả màn hình ── -->
+    <section class="view" id="viewFocus" hidden>
+      <div class="fx">
+        <div class="fx-head">
+          <button class="back" onclick="showOverview()">← Overview</button>
+          <div class="fx-title" id="fxTitle"></div>
+          <div class="spacer"></div>
+          <button class="btn primary" onclick="openPanel('new')">＋ Thêm mới</button>
+        </div>
+        <div class="fx-body">
+          <div class="list" id="fxList"></div>
+          <!-- Panel bên phải thay cho modal -->
+          <aside class="panel">
+            <div class="panel-inner">
+              <div class="panel-head">
+                <span class="t" id="panelTitle">Chi tiết</span>
+                <div class="spacer"></div>
+                <button class="iconbtn" onclick="closePanel()" title="Đóng (Esc)">✕</button>
+              </div>
+              <div class="panel-scroll" id="panelBody"></div>
+              <div class="panel-foot">
+                <button class="btn danger" onclick="closePanel()">Xoá</button>
+                <div class="spacer"></div>
+                <button class="btn" onclick="closePanel()">Huỷ</button>
+                <button class="btn primary" onclick="closePanel()">Lưu thay đổi</button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   DỮ LIỆU DEMO — mỗi module = 1 khối ở Overview + 1 màn focus
+   ============================================================ */
+const MODULES = {
+  dns: {
+    icon:'⛁', name:'DNS', sub:'4 bản ghi · 2 proxied',
+    highlights:[
+      ['A  @',        '203.0.113.10 · proxied'],
+      ['CNAME  www',  '@ · proxied'],
+      ['MX',          '2 bản ghi'],
+      ['TXT  SPF',    'v=spf1 include:_spf…'],
+    ],
+    tags:[['ok','DNSSEC on'],['','TTL auto']],
+    cols:['Type','Name','Content','Proxy','TTL'],
+    rows:[
+      {sel:['A','@','203.0.113.10','Proxied','Auto'], title:'A · @'},
+      {sel:['CNAME','www','mmthui.xyz','Proxied','Auto'], title:'CNAME · www'},
+      {sel:['MX','@','mx1.forwardemail.net','DNS only','Auto'], title:'MX · @'},
+      {sel:['TXT','@','v=spf1 include:_spf.google.com ~all','DNS only','Auto'], title:'TXT · @'},
+    ],
+    form:'dns',
+  },
+  cache: {
+    icon:'⚡', name:'Cache', sub:'1 cache rule đang bật',
+    highlights:[
+      ['Cache level',  'Aggressive'],
+      ['Browser TTL',  '4 giờ'],
+      ['Tiered cache', 'Smart'],
+      ['Cache Rules',  '1 active'],
+    ],
+    tags:[['ok','Hit 87.4%'],['','Dev mode off']],
+    cols:['Order','Name','Match against','Action','Status'],
+    rows:[
+      {sel:['1','vdm-html-guest','(http.host eq "vdm.mmthui.xyz" and not …/wp-admin)','Browser TTL, Edge TTL, Eligible for cache','Active'], title:'Cache rule · vdm-html-guest'},
+      {sel:['2','static-assets','(http.request.uri.path.extension in {"css" "js" …})','Edge TTL, Eligible for cache','Disabled'], title:'Cache rule · static-assets'},
+    ],
+    form:'rule',
+  },
+  rules: {
+    icon:'⇄', name:'Rules', sub:'Page Rules 1/20 · Redirect 2 · Config 1',
+    highlights:[
+      ['Page Rules',    '1 / 20'],
+      ['Redirect Rules','2 active'],
+      ['Config Rules',  '1 active'],
+      ['Rule mới nhất', 'www → root (301)'],
+    ],
+    tags:[['warn','1 rule tắt']],
+    cols:['Order','Name','Match against','Action','Status'],
+    rows:[
+      {sel:['1','www-to-root','(http.host eq "www.mmthui.xyz")','301 → https://mmthui.xyz','Active'], title:'Redirect · www-to-root'},
+      {sel:['2','old-blog','(starts_with(http.request.uri.path, "/blog/"))','301 → /news/','Active'], title:'Redirect · old-blog'},
+      {sel:['3','api-friendly','(starts_with(http.request.uri.path, "/api/"))','BIC: Off, Email Obfuscation: Off','Active'], title:'Configuration · api-friendly'},
+    ],
+    form:'rule',
+  },
+  security: {
+    icon:'⛨', name:'Security', sub:'SSL Full (strict) · WAF on',
+    highlights:[
+      ['SSL/TLS',        'Full (strict)'],
+      ['Always HTTPS',   'On'],
+      ['Security level', 'Medium'],
+      ['Bot Fight Mode', 'On'],
+    ],
+    tags:[['ok','HSTS on'],['','Min TLS 1.2']],
+    cols:['Thiết lập','Giá trị','Nguồn','Trạng thái'],
+    rows:[
+      {sel:['SSL/TLS mode','Full (strict)','Zone setting','Active'], title:'SSL/TLS mode'},
+      {sel:['Always Use HTTPS','On','Zone setting','Active'], title:'Always Use HTTPS'},
+      {sel:['Security level','Medium','Zone setting','Active'], title:'Security level'},
+      {sel:['IP Access Rules','3 quy tắc','Firewall','Active'], title:'IP Access Rules'},
+    ],
+    form:'setting',
+  },
+  tags: {
+    icon:'#', name:'Tags', sub:'3 nhãn · 1 quy tắc tự gán',
+    highlights:[
+      ['Nhãn',        'production, wordpress, vn'],
+      ['Quy tắc',     '1 auto-tag'],
+      ['Gán gần nhất','wordpress · 2 ngày trước'],
+    ],
+    tags:[['','Thủ công + tự động']],
+    cols:['Tag','Loại','Áp dụng cho','Trạng thái'],
+    rows:[
+      {sel:['production','Thủ công','1 domain','Active'], title:'Tag · production'},
+      {sel:['wordpress','Tự động','Khớp 4 domain','Active'], title:'Tag · wordpress'},
+    ],
+    form:'setting',
+  },
+  analytics: {
+    icon:'◔', name:'Analytics', sub:'24 giờ gần nhất',
+    highlights:[
+      ['Requests',   '1.24M'],
+      ['Cache hit',  '87.4%'],
+      ['Bandwidth',  '42.8 GB'],
+      ['Threats',    '1,208'],
+    ],
+    tags:[['ok','+12% so với hôm qua']],
+    cols:['Chỉ số','24h','7 ngày','Xu hướng'],
+    rows:[
+      {sel:['Requests','1.24M','8.6M','▲ 12%'], title:'Requests'},
+      {sel:['Cache hit','87.4%','85.1%','▲ 2.3pt'], title:'Cache hit'},
+    ],
+    form:'setting',
+  },
+};
+
+/* ============================================================
+   OVERVIEW: render các khối chức năng
+   ============================================================ */
+document.getElementById('cards').innerHTML = Object.entries(MODULES).map(([key,m])=>`
+  <button class="card" onclick="openModule('${key}')">
+    <div class="card-top">
+      <span class="card-ic">${m.icon}</span>
+      <span>
+        <div class="card-h">${m.name}</div>
+        <div class="card-sub">${m.sub}</div>
+      </span>
+      <span class="go">→</span>
+    </div>
+    <div class="rows">
+      ${m.highlights.map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${escapeHtml(v)}</span></div>`).join('')}
+    </div>
+    <div class="card-foot">
+      ${(m.tags||[]).map(([kind,label])=>`<span class="tag ${kind}">${kind==='ok'?'<span class="dot ok"></span>':''}${label}</span>`).join('')}
+    </div>
+  </button>
+`).join('');
+
+/* Sidebar items (chỉ hiện khi vào focus mode) */
+document.getElementById('railItems').innerHTML = Object.entries(MODULES).map(([key,m])=>`
+  <button class="rail-item" data-key="${key}" onclick="openModule('${key}')">
+    <span class="ic">${m.icon}</span> ${m.name}
+    <span class="cnt">${m.rows.length}</span>
+  </button>
+`).join('');
+
+/* ============================================================
+   FOCUS MODE — khối chiếm cả màn hình, tab chuyển sang sidebar
+   ============================================================ */
+let current = null;
+
+function openModule(key){
+  current = key;
+  const m = MODULES[key];
+  document.body.classList.add('focus');
+  document.body.classList.remove('panel-open');
+  document.getElementById('viewOverview').hidden = true;
+  document.getElementById('viewFocus').hidden = false;
+  document.getElementById('fxTitle').innerHTML = `${m.icon} ${m.name} <span class="tag">${m.rows.length} mục</span>`;
+
+  document.querySelectorAll('.rail-item[data-key]').forEach(b=>
+    b.classList.toggle('active', b.dataset.key===key));
+
+  document.getElementById('fxList').innerHTML = `
+    <div class="sec">
+      <span class="t">${m.name} · ${m.sub}</span>
+      <span class="r"><button class="btn" onclick="openPanel('new')">＋ Thêm mới</button></span>
+    </div>
+    <table>
+      <thead><tr>${m.cols.map((c,i)=>`<th style="${i===0?'width:82px':''}">${c}</th>`).join('')}</tr></thead>
+      <tbody>
+        ${m.rows.map((r,i)=>`
+          <tr class="item" data-i="${i}" onclick="openPanel(${i})">
+            ${r.sel.map((cell,ci)=>{
+              if(ci===1) return `<td><span class="name">${escapeHtml(cell)}</span></td>`;
+              if(ci===2) return `<td><code>${escapeHtml(cell)}</code></td>`;
+              if(cell==='Active') return `<td><span class="tag ok"><span class="dot ok"></span>Active</span></td>`;
+              if(cell==='Disabled') return `<td><span class="tag off">Disabled</span></td>`;
+              return `<td>${escapeHtml(cell)}</td>`;
+            }).join('')}
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function showOverview(){
+  current = null;
+  document.body.classList.remove('focus','panel-open');
+  document.getElementById('viewFocus').hidden = true;
+  document.getElementById('viewOverview').hidden = false;
+}
+
+/* ============================================================
+   PANEL BÊN PHẢI (thay cho modal)
+   ============================================================ */
+function openPanel(which){
+  const m = MODULES[current];
+  const isNew = which === 'new';
+  const row = isNew ? null : m.rows[which];
+
+  document.querySelectorAll('tr.item').forEach(tr=>
+    tr.classList.toggle('sel', !isNew && Number(tr.dataset.i)===which));
+
+  document.getElementById('panelTitle').textContent = isNew ? `Thêm ${m.name}` : (row.title || 'Chi tiết');
+  document.getElementById('panelBody').innerHTML = FORMS[m.form](row, isNew);
+  document.body.classList.add('panel-open');
+}
+
+function closePanel(){
+  document.body.classList.remove('panel-open');
+  document.querySelectorAll('tr.item').forEach(tr=>tr.classList.remove('sel'));
+}
+
+/* Nội dung form theo từng loại module */
+const FORMS = {
+  rule: (row, isNew) => `
+    <div class="f">
+      <label>Gợi ý cấu hình phổ biến</label>
+      <select onchange="applySuggest(this.value)">
+        <option value="">— Chọn cấu hình có sẵn (tuỳ chọn) —</option>
+        <option value="guest">Cache HTML cho khách (Cache Everything)</option>
+        <option value="static">Cache mạnh tài nguyên tĩnh</option>
+        <option value="bypass">Bỏ cache khu quản trị WordPress</option>
+      </select>
+      <div class="hint">Điền sẵn form theo cấu hình phổ biến — vẫn sửa được mọi thứ trước khi lưu.</div>
+    </div>
+
+    <div class="f">
+      <label>Tên rule</label>
+      <input type="text" value="${isNew?'':escapeAttr(row.sel[1])}" placeholder="vd. cache-html-guest">
+    </div>
+
+    <div class="grp">
+      <div class="gt">Khi request khớp điều kiện</div>
+      <div class="seg" style="margin-bottom:9px">
+        <button class="on">Biểu thức tuỳ chỉnh</button><button>Mọi request</button>
+      </div>
+      <div class="expr-row">
+        <select><option>Hostname</option><option>URI Path</option><option>Cookie</option><option>Phần mở rộng file</option></select>
+        <select><option>bằng</option><option>chứa</option><option>bắt đầu bằng</option><option>wildcard</option></select>
+        <input type="text" value="vdm.mmthui.xyz">
+        <button class="btn ghost" title="Xoá dòng">✕</button>
+      </div>
+      <div class="expr-row">
+        <select style="min-width:74px"><option>Và</option><option>Hoặc</option></select>
+        <select><option>URI Path</option><option>Hostname</option><option>Cookie</option></select>
+        <select><option>không chứa</option><option>chứa</option></select>
+        <input type="text" value="/wp-admin">
+        <button class="btn ghost">✕</button>
+      </div>
+      <div style="display:flex;gap:6px;margin:8px 0 10px">
+        <button class="btn">＋ Và</button><button class="btn">＋ Hoặc</button>
+      </div>
+      <div class="preview">(<b>http.host</b> eq "vdm.mmthui.xyz" and not <b>http.request.uri.path</b> contains "/wp-admin")</div>
+      <div class="counter"><span>88 / 4000 ký tự</span><span class="spacer"></span><span class="link">Sửa biểu thức</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">Thiết lập</div>
+      <div class="f"><label>Khả năng cache</label>
+        <select><option>Cho phép cache</option><option>Bỏ qua cache</option></select></div>
+      <div class="two">
+        <div class="f"><label>Edge TTL</label><select><option>Ghi đè origin</option><option>Theo origin</option></select></div>
+        <div class="f"><label>Giá trị (giây)</label><input type="text" value="14400"></div>
+      </div>
+      <div class="two">
+        <div class="f"><label>Browser TTL</label><select><option>Theo origin</option><option>Ghi đè origin</option></select></div>
+        <div class="f"><label>Sắp xếp query string</label><select><option>Không thiết lập</option><option>Bật</option><option>Tắt</option></select></div>
+      </div>
+      <div class="f"><label>Trạng thái</label>
+        <div class="seg"><button class="on">Bật</button><button>Tắt</button></div></div>
+    </div>
+
+    <div class="f">
+      <label>Tham số nâng cao (JSON)</label>
+      <textarea rows="3" placeholder='{ "vary": { "default": { "action": "bypass" } } }'></textarea>
+      <div class="hint">Thiết lập chưa có ô riêng được giữ ở đây và gộp lại khi lưu.</div>
+    </div>`,
+
+  dns: (row, isNew) => `
+    <div class="two">
+      <div class="f"><label>Loại</label><select><option>${isNew?'A':escapeAttr(row.sel[0])}</option><option>CNAME</option><option>MX</option><option>TXT</option></select></div>
+      <div class="f"><label>TTL</label><select><option>Auto</option><option>1 phút</option><option>1 giờ</option></select></div>
+    </div>
+    <div class="f"><label>Tên</label><input type="text" value="${isNew?'':escapeAttr(row.sel[1])}"></div>
+    <div class="f"><label>Nội dung</label><input type="text" value="${isNew?'':escapeAttr(row.sel[2])}"></div>
+    <div class="f"><label>Proxy status</label>
+      <div class="seg"><button class="on">Proxied</button><button>DNS only</button></div>
+      <div class="hint">Proxied: traffic đi qua Cloudflare (ẩn IP gốc, dùng được cache & WAF).</div>
+    </div>
+    <div class="f"><label>Ghi chú</label><input type="text" placeholder="Tuỳ chọn"></div>`,
+
+  setting: (row, isNew) => `
+    <div class="f"><label>Thiết lập</label><input type="text" value="${isNew?'':escapeAttr(row.sel[0])}"></div>
+    <div class="f"><label>Giá trị</label>
+      <select><option>${isNew?'—':escapeAttr(row.sel[1])}</option><option>Tuỳ chọn khác…</option></select></div>
+    <div class="f"><label>Trạng thái</label>
+      <div class="seg"><button class="on">Bật</button><button>Tắt</button></div></div>
+    <div class="grp"><div class="gt">Ghi chú</div>
+      <div class="mini">Thay đổi được ghi vào lịch sử và có thể rollback trong tab Lịch sử.</div></div>`,
+};
+
+function applySuggest(v){
+  const box = document.querySelector('.preview');
+  if(!v || !box) return;
+  const map = {
+    guest:'(<b>http.host</b> eq "mmthui.xyz" and not (starts_with(<b>http.request.uri.path</b>, "/wp-admin") or …) and not (<b>http.cookie</b> contains "wordpress_logged_in_" or …))',
+    static:'(<b>http.request.uri.path.extension</b> in {"css" "js" "jpg" "png" "webp" …})',
+    bypass:'(starts_with(<b>http.request.uri.path</b>, "/wp-admin") or starts_with(<b>http.request.uri.path</b>, "/wp-login") or …)',
+  };
+  box.innerHTML = map[v];
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function escapeAttr(s){return escapeHtml(s).replace(/"/g,'&quot;')}
+
+/* Phím tắt: Esc đóng panel → Esc lần nữa quay lại Overview */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(document.body.classList.contains('panel-open')) closePanel();
+  else if(document.body.classList.contains('focus')) showOverview();
+});
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +16,7 @@ import '../i18n'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useCommandPalette } from '../stores/useCommandPalette'
+import { useFocusMode } from '../stores/useFocusMode'
 import AppShell from './AppShell'
 
 const apiGet = vi.mocked(api.get)
@@ -46,6 +47,7 @@ describe('AppShell', () => {
     vi.clearAllMocks()
     apiGet.mockResolvedValue({ data: [] })
     useCommandPalette.setState({ open: false })
+    useFocusMode.setState({ active: false })
   })
 
   it('renders sidebar nav items, brand and outlet content', async () => {
@@ -85,5 +87,26 @@ describe('AppShell', () => {
     renderShell('/')
     fireEvent.click(screen.getByRole('button', { name: /Quick find/ }))
     expect(await screen.findByPlaceholderText('Type to search…')).toBeInTheDocument()
+  })
+
+  it('collapses the desktop sidebar when focus mode is active', async () => {
+    const { container } = renderShell('/')
+    expect(await screen.findByText('home-page')).toBeInTheDocument()
+
+    const aside = container.querySelector('aside')
+    expect(aside).not.toBeNull()
+    expect(aside!.className).toContain('w-[264px]')
+    expect(aside!.className).not.toContain('w-0')
+
+    act(() => {
+      useFocusMode.setState({ active: true })
+    })
+    expect(aside!.className).toContain('w-0')
+    expect(aside!.className).not.toContain('w-[264px]')
+
+    act(() => {
+      useFocusMode.setState({ active: false })
+    })
+    expect(aside!.className).toContain('w-[264px]')
   })
 })

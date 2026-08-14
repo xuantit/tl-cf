@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Alert, Button, Divider, Form, Input, InputNumber, Modal, Select, Space, Typography } from 'antd'
+import { Alert, Button, Divider, Form, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { message } from '../../lib/antdApp'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -18,14 +18,20 @@ type FormValues = {
 }
 
 interface Props {
-  open: boolean
   zoneName?: string
-  title: string
   loading?: boolean
   initialValue?: PageRuleInput
   onSubmit: (values: PageRuleInput) => void
   onCancel: () => void
+  /** Hiện nút Xoá khi đang sửa rule (design panel). */
+  onDelete?: () => void
 }
+
+/**
+ * Form tạo/sửa Page Rule (legacy) — render bên trong DetailPanel (panel trượt
+ * phải). Caller phải gắn `key` theo rule đang sửa để remount và nhận
+ * initialValues mới (panel giữ children luôn mounted).
+ */
 
 const NO_VALUE_ACTIONS = new Set(['always_use_https', 'disable_performance', 'disable_security', 'disable_apps'])
 const ON_OFF_ACTIONS = new Set(['automatic_https_rewrites', 'rocket_loader', 'ip_geolocation'])
@@ -157,13 +163,12 @@ function ActionValueEditor({ fieldName, actionId }: { fieldName: number; actionI
 }
 
 export default function PageRuleFormModal({
-  open,
   zoneName,
-  title,
   loading,
   initialValue,
   onSubmit,
   onCancel,
+  onDelete,
 }: Props) {
   const { t } = useTranslation()
   const [form] = Form.useForm<FormValues>()
@@ -233,21 +238,7 @@ export default function PageRuleFormModal({
   }
 
   return (
-    <Modal
-      title={title}
-      open={open}
-      onCancel={onCancel}
-      footer={null}
-      destroyOnHidden
-      width={720}
-      afterOpenChange={(visible) => {
-        if (!visible) return
-        form.resetFields()
-        form.setFieldsValue(toFormValues(initialValue, zoneName))
-        setSelectedPreset('custom')
-      }}
-    >
-      <Form form={form} layout='vertical' onFinish={handleFinish} initialValues={toFormValues(initialValue, zoneName)}>
+    <Form form={form} layout='vertical' onFinish={handleFinish} initialValues={toFormValues(initialValue, zoneName)}>
         {!isEdit && (
           <Form.Item label={t('Load a template')}>
             <Select value={selectedPreset} onChange={applyPreset} options={presetOptions} />
@@ -283,10 +274,10 @@ export default function PageRuleFormModal({
           {(fields, { add, remove }) => (
             <Space orientation='vertical' style={{ width: '100%', marginTop: 8 }} size='small'>
               {fields.map((field) => (
-                <Space key={field.key} align='start' style={{ width: '100%' }}>
+                <div key={field.key} className="flex flex-wrap items-start gap-2">
                   <Form.Item
                     name={[field.name, 'id']}
-                    style={{ marginBottom: 0, width: 220 }}
+                    style={{ marginBottom: 0, flex: '1 1 170px', minWidth: 170 }}
                     rules={[{ required: true, message: t('Pick a Setting') }]}
                   >
                     <Select
@@ -300,7 +291,7 @@ export default function PageRuleFormModal({
                     />
                   </Form.Item>
 
-                  <div style={{ flex: 1, minWidth: 240 }}>
+                  <div style={{ flex: '1 1 180px', minWidth: 180 }}>
                     {/* shouldUpdate ensures the value editor re-renders when the setting changes or a template is loaded */}
                     <Form.Item
                       noStyle
@@ -318,7 +309,7 @@ export default function PageRuleFormModal({
                   </div>
 
                   <Button icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                </Space>
+                </div>
               ))}
 
               <Button type='dashed' icon={<PlusOutlined />} onClick={() => add({ id: undefined, value: undefined })}>
@@ -340,14 +331,20 @@ export default function PageRuleFormModal({
         </Form.Item>
 
         <Form.Item style={{ marginTop: 8, marginBottom: 0 }}>
-          <Space>
-            <Button type='primary' htmlType='submit' loading={loading}>
-              {isEdit ? t('Update') : t('Save and Deploy')}
-            </Button>
-            <Button onClick={onCancel}>{t('Cancel')}</Button>
-          </Space>
+          <div className="flex w-full items-center gap-2">
+            {isEdit && onDelete && (
+              <Button danger onClick={onDelete}>
+                {t('Delete')}
+              </Button>
+            )}
+            <span className="ml-auto flex gap-2">
+              <Button onClick={onCancel}>{t('Cancel')}</Button>
+              <Button type='primary' htmlType='submit' loading={loading}>
+                {isEdit ? t('Update') : t('Save and Deploy')}
+              </Button>
+            </span>
+          </div>
         </Form.Item>
       </Form>
-    </Modal>
   )
 }

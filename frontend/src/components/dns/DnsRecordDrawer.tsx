@@ -17,6 +17,8 @@ export interface DnsRecordDrawerProps {
   /** Resolves when the record is saved; `again` keeps the drawer open for the next record. */
   onSubmit: (values: DnsRecordInput, again: boolean) => Promise<unknown>
   onClose: () => void
+  /** Hiện nút Xoá ở footer khi đang sửa bản ghi (design panel). */
+  onDelete?: () => void
 }
 
 /** Content-field label per record type (.drw mockup). */
@@ -89,14 +91,40 @@ export default function DnsRecordDrawer({
   )
 }
 
+/**
+ * Form tạo/sửa bản ghi DNS — dùng được cả trong Drawer (mobile) lẫn DetailPanel
+ * (panel trượt bên phải theo design mới). Có footer riêng nên container không
+ * cần padding.
+ */
+export function DnsRecordForm({
+  zoneName,
+  initialValues,
+  saving,
+  onSubmit,
+  onClose,
+  onDelete,
+}: Omit<DnsRecordDrawerProps, 'open'>) {
+  return (
+    <DrawerBody
+      key={initialValues?.id ?? 'new'}
+      zoneName={zoneName}
+      initialValues={initialValues}
+      saving={saving}
+      onSubmit={onSubmit}
+      onClose={onClose}
+      onDelete={onDelete}
+    />
+  )
+}
+
 function DrawerBody({
   zoneName,
   initialValues,
   saving,
   onSubmit,
   onClose,
-}: Omit<DnsRecordDrawerProps, 'open'>) {
-  const { t } = useTranslation()
+  onDelete,
+}: Omit<DnsRecordDrawerProps, 'open'>) {  const { t } = useTranslation()
   const [type, setType] = useState(initialValues?.type ?? 'A')
   const [name, setName] = useState(initialValues?.name ?? '')
   const [content, setContent] = useState(initialValues?.content ?? '')
@@ -271,6 +299,11 @@ function DrawerBody({
 
       {/* Footer */}
       <div className="flex gap-[7px] border-t border-stroke bg-bg-side px-4 py-[11px]">
+        {initialValues && onDelete && (
+          <Button danger onClick={onDelete}>
+            {t('Delete')}
+          </Button>
+        )}
         <Button type="primary" className="flex-1" loading={saving} onClick={() => submit(false)}>
           {t('Save record')}
         </Button>

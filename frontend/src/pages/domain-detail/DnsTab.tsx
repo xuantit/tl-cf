@@ -8,8 +8,8 @@ import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import BulkActionBar, { BulkActionButton } from '../../components/BulkActionBar'
 import ConfirmDestructive from '../../components/ConfirmDestructive'
-import DnsRecordDrawer from '../../components/dns/DnsRecordDrawer'
-import { EmptyState, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
+import { DnsRecordForm } from '../../components/dns/DnsRecordDrawer'
+import { DetailPanel, EmptyState, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
 import type { TagVariant } from '../../components/ui'
 import { api, apiErrorDetail } from '../../services/api'
 import type { DnsRecord, DnsRecordInput } from '../../types/domain'
@@ -220,34 +220,86 @@ export default function DnsTab({ zoneId, zoneName }: { zoneId: string; zoneName?
         actions={<Tag>zone {zoneId.slice(0, 12)}</Tag>}
       />
 
-      {isLoading ? (
-        <div className="flex flex-col gap-[14px] py-3" data-testid="dns-skeleton">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonLine key={i} width={`${90 - (i % 3) * 12}%`} />
-          ))}
+      <div className="flex">
+        <div className="min-w-0 flex-1">
+          {isLoading ? (
+            <div className="flex flex-col gap-[14px] py-3" data-testid="dns-skeleton">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonLine key={i} width={`${90 - (i % 3) * 12}%`} />
+              ))}
+            </div>
+          ) : (
+            <Table
+              dataSource={records}
+              rowKey="id"
+              columns={columns}
+              rowSelection={{
+                selectedRowKeys: selected,
+                onChange: (keys: Key[]) => setSelected(keys as string[]),
+              }}
+              onRow={(record) => ({
+                onClick: (event) => {
+                  // Bỏ qua click vào checkbox chọn dòng hoặc menu ⋯
+                  const target = event.target as HTMLElement
+                  if (target.closest('.ant-checkbox-wrapper, .ant-dropdown-trigger, .ant-dropdown, button')) return
+                  setParams({ modal: 'dns-edit', edit: record.id })
+                },
+                style: { cursor: 'pointer' },
+              })}
+              rowClassName={(record) => (record.id === editId ? 'bg-bg-sel' : '')}
+              locale={{
+                emptyText: (
+                  <EmptyState
+                    icon="⊞"
+                    title={t('No DNS records')}
+                    desc={t('Add the first record for this zone')}
+                  />
+                ),
+              }}
+              pagination={records.length > 50 ? { pageSize: 50 } : false}
+              scroll={{ x: 'max-content' }}
+            />
+          )}
         </div>
-      ) : (
-        <Table
-          dataSource={records}
-          rowKey="id"
-          columns={columns}
-          rowSelection={{
-            selectedRowKeys: selected,
-            onChange: (keys: Key[]) => setSelected(keys as string[]),
-          }}
-          locale={{
-            emptyText: (
-              <EmptyState
-                icon="⊞"
-                title={t('No DNS records')}
-                desc={t('Add the first record for this zone')}
-              />
-            ),
-          }}
-          pagination={records.length > 50 ? { pageSize: 50 } : false}
-          scroll={{ x: 'max-content' }}
-        />
-      )}
+
+        {/* Panel trượt bên phải thay cho Drawer overlay — đẩy bảng co lại như design */}
+        <DetailPanel
+          open={drawerOpen}
+          padded={false}
+          title={
+            <span className="flex items-center gap-2">
+              {editingRecord ? t('Edit DNS record') : t('Add DNS record')}
+              {zoneName && (
+                <span className="rounded-[4px] border border-stroke-2 bg-bg-hover px-[6px] py-[3.5px] font-mono text-[11px] leading-none font-normal text-fg-2">
+                  {zoneName}
+                </span>
+              )}
+            </span>
+          }
+          onClose={() => setParams({ modal: null, edit: null })}
+        >
+          {drawerOpen && (
+            <DnsRecordForm
+              zoneName={zoneName}
+              initialValues={editingRecord}
+              saving={saveRecord.isPending}
+              onSubmit={async (values, again) => {
+                await saveRecord.mutateAsync({ recordId: editingRecord?.id ?? null, data: values })
+                if (!again) setParams({ modal: null, edit: null })
+              }}
+              onClose={() => setParams({ modal: null, edit: null })}
+              onDelete={
+                editingRecord
+                  ? () => {
+                      setParams({ modal: null, edit: null })
+                      setDeleteIds([editingRecord.id])
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </DetailPanel>
+      </div>
 
       <BulkActionBar count={selected.length} unit={t('record')} onClear={() => setSelected([])}>
         <BulkActionButton
@@ -276,18 +328,6 @@ export default function DnsTab({ zoneId, zoneName }: { zoneId: string; zoneName?
         loading={deleteRecords.isPending}
         onConfirm={() => deleteRecords.mutate(deleteIds)}
         onCancel={() => setDeleteIds([])}
-      />
-
-      <DnsRecordDrawer
-        open={drawerOpen}
-        zoneName={zoneName}
-        initialValues={editingRecord}
-        saving={saveRecord.isPending}
-        onSubmit={async (values, again) => {
-          await saveRecord.mutateAsync({ recordId: editingRecord?.id ?? null, data: values })
-          if (!again) setParams({ modal: null, edit: null })
-        }}
-        onClose={() => setParams({ modal: null, edit: null })}
       />
     </>
   )

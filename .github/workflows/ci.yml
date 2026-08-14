@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node-backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cftool
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5433/cftool
+      # Khóa CHỈ dùng cho CI — không phải secret thật
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      JWT_SECRET: ci-only-jwt-secret-not-used-in-production-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: node-backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run migrations
+        run: npx drizzle-kit migrate
+      - name: Run tests
+        run: npm test
+      - name: Type-check & build
+        run: npm run build
+
+  frontend:
+    name: Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npx eslint src
+      - name: Run tests
+        run: npx vitest run
+      - name: Build
+        run: npm run build

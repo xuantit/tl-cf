@@ -13,6 +13,8 @@ const SettingsPage = lazy(() => import('./pages/Settings'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Templates = lazy(() => import('./pages/Templates'))
+const Tunnels = lazy(() => import('./pages/Tunnels'))
+const WorkersPages = lazy(() => import('./pages/WorkersPages'))
 const History = lazy(() => import('./pages/History'))
 const Invites = lazy(() => import('./pages/Invites'))
 const Users = lazy(() => import('./pages/Users'))
@@ -72,6 +74,8 @@ function App() {
             <Route path="dns" element={<RedirectZonePage tab="dns" />} />
             <Route path="cache" element={<RedirectZonePage tab="cache" />} />
             <Route path="templates" element={<Templates />} />
+            <Route path="workers" element={<WorkersPages />} />
+            <Route path="tunnels" element={<Tunnels />} />
             <Route path="history" element={<History />} />
             <Route path="jobs" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'jobs' }} />} />
             <Route path="changes" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'changes' }} />} />

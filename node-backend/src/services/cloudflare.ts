@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import axios, { AxiosError, AxiosInstance } from "axios";
 
 export interface CloudflareApiIssue {
@@ -106,6 +108,105 @@ export interface AccessRule {
   notes?: string;
   created_on?: string;
   modified_on?: string;
+}
+
+export interface Tunnel {
+  id: string;
+  name: string;
+  status: "inactive" | "degraded" | "healthy" | "down";
+  createdAt?: string;
+  remoteConfig: boolean;
+  connections: Array<{ colo?: string; version?: string; originIp?: string; openedAt?: string; clientId?: string }>;
+}
+
+export interface TunnelIngressRule {
+  hostname?: string;
+  service: string;
+  path?: string;
+  originRequest?: Record<string, unknown>;
+}
+
+export interface TunnelConnectorClient {
+  id: string;
+  version?: string;
+  arch?: string;
+  runAt?: string;
+  conns: Array<{ colo?: string; openedAt?: string; originIp?: string }>;
+}
+
+export interface WorkerScript {
+  id: string;
+  createdOn?: string;
+  modifiedOn?: string;
+  handlers: string[];
+  routes: Array<{ id: string; pattern: string }>;
+  lastDeployedFrom?: string;
+  compatibilityDate?: string;
+  hasAssets?: boolean;
+  logpush?: boolean;
+}
+
+export interface WorkerRoute {
+  id: string;
+  pattern: string;
+  script?: string;
+}
+
+export interface PagesDeployment {
+  id: string;
+  environment?: string;
+  url?: string;
+  createdOn?: string;
+  modifiedOn?: string;
+  branch?: string;
+  commitHash?: string;
+  status?: string;
+}
+
+export interface PagesProject {
+  name: string;
+  subdomain?: string;
+  domains: string[];
+  createdOn?: string;
+  productionBranch?: string;
+  latestDeployment?: PagesDeployment | null;
+}
+
+export interface PagesDomain {
+  id?: string;
+  name: string;
+  status?: string;
+}
+
+export interface WorkerSecret {
+  name: string;
+  type?: string;
+}
+
+export interface WorkerSubdomainSetting {
+  enabled: boolean;
+  previewsEnabled?: boolean;
+}
+
+export interface PagesEnvVar {
+  key: string;
+  value: string;
+  secret: boolean;
+}
+
+export interface PagesProjectDetail {
+  name: string;
+  productionBranch?: string;
+  envVars: PagesEnvVar[];
+}
+
+// Cache accountId đã resolve theo credential (fingerprint sha256) trong 60s
+// để tránh gọi GET /accounts trước mỗi request tunnel.
+const accountIdCache = new Map<string, { accountId: string; expiresAt: number }>();
+const ACCOUNT_ID_CACHE_TTL_MS = 60_000;
+
+export function clearAccountIdCache(): void {
+  accountIdCache.clear();
 }
 
 export type RuleKind = "redirect" | "cache" | "configuration";
@@ -1190,6 +1291,794 @@ class CloudflareService {
     }
     if (!response.data.success) {
       throw this.createCloudflareApiError(response.data, "Failed to delete access rule");
+    }
+  }
+
+  // ---- Cloudflare Tunnel (account-scoped, remotely-managed) ----
+
+  private credentialFingerprint(credentials: CloudflareCredentials): string {
+    const secret = credentials.apiToken || credentials.globalApiKey || "";
+    return createHash("sha256")
+      .update(`${credentials.authType ?? ""}:${credentials.email ?? ""}:${secret}`)
+      .digest("hex");
+  }
+
+  async resolveAccountId(credentials: CloudflareCredentials): Promise<string> {
+    const key = this.credentialFingerprint(credentials);
+    const cached = accountIdCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.accountId;
+    }
+    const accounts = await this.listAccounts(credentials);
+    if (accounts.length === 0) {
+      throw new CloudflareError({
+        message: "No Cloudflare account is accessible with these credentials",
+        retryable: false,
+      });
+    }
+    const accountId = accounts[0].id;
+    accountIdCache.set(key, { accountId, expiresAt: Date.now() + ACCOUNT_ID_CACHE_TTL_MS });
+    return accountId;
+  }
+
+  private mapTunnel(raw: any): Tunnel {
+    return {
+      id: raw.id,
+      name: raw.name,
+      status: raw.status,
+      createdAt: raw.created_at ?? undefined,
+      remoteConfig: Boolean(raw.remote_config),
+      connections: (raw.connections || []).map((conn: any) => ({
+        colo: conn.colo_name ?? undefined,
+        version: conn.client_version ?? undefined,
+        originIp: conn.origin_ip ?? undefined,
+        openedAt: conn.opened_at ?? undefined,
+        clientId: conn.client_id ?? undefined,
+      })),
+    };
+  }
+
+  async listTunnels(credentials: CloudflareCredentials): Promise<Tunnel[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/cfd_tunnel`, { params: { is_deleted: false } });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch tunnels");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch tunnels");
+    }
+    return (response.data.result || []).map((tunnel: any) => this.mapTunnel(tunnel));
+  }
+
+  async createTunnel(credentials: CloudflareCredentials, name: string): Promise<Tunnel> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(`/accounts/${accountId}/cfd_tunnel`, {
+        name,
+        config_src: "cloudflare",
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to create tunnel");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to create tunnel");
+    }
+    // mapTunnel cố tình KHÔNG copy trường token mà CF trả về khi tạo tunnel.
+    return this.mapTunnel(response.data.result);
+  }
+
+  async deleteTunnel(credentials: CloudflareCredentials, tunnelId: string): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/cfd_tunnel/${tunnelId}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete tunnel");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete tunnel");
+    }
+  }
+
+  async getTunnelConfiguration(
+    credentials: CloudflareCredentials,
+    tunnelId: string,
+  ): Promise<{ ingress: TunnelIngressRule[]; source?: string }> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch tunnel configuration");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch tunnel configuration");
+    }
+    const result = response.data.result;
+    return {
+      ingress: result?.config?.ingress ?? [],
+      source: result?.source ?? undefined,
+    };
+  }
+
+  async putTunnelConfiguration(
+    credentials: CloudflareCredentials,
+    tunnelId: string,
+    ingress: TunnelIngressRule[],
+  ): Promise<{ ingress: TunnelIngressRule[]; source?: string }> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.put(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
+        config: { ingress },
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to update tunnel configuration");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to update tunnel configuration");
+    }
+    const result = response.data.result;
+    return {
+      ingress: result?.config?.ingress ?? ingress,
+      source: result?.source ?? undefined,
+    };
+  }
+
+  async getTunnelToken(credentials: CloudflareCredentials, tunnelId: string): Promise<string> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/token`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch tunnel token");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch tunnel token");
+    }
+    return response.data.result as string;
+  }
+
+  async listTunnelConnections(
+    credentials: CloudflareCredentials,
+    tunnelId: string,
+  ): Promise<TunnelConnectorClient[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/connections`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch tunnel connections");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch tunnel connections");
+    }
+    return (response.data.result || []).map((clientInfo: any) => ({
+      id: clientInfo.id,
+      version: clientInfo.version ?? undefined,
+      arch: clientInfo.arch ?? undefined,
+      runAt: clientInfo.run_at ?? undefined,
+      conns: (clientInfo.conns || []).map((conn: any) => ({
+        colo: conn.colo_name ?? undefined,
+        openedAt: conn.opened_at ?? undefined,
+        originIp: conn.origin_ip ?? undefined,
+      })),
+    }));
+  }
+
+  async deleteTunnelConnections(credentials: CloudflareCredentials, tunnelId: string): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/connections`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete tunnel connections");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete tunnel connections");
+    }
+  }
+
+  // ---- Workers (account-scoped scripts + zone-scoped routes) ----
+
+  private mapWorkerScript(raw: any): WorkerScript {
+    return {
+      id: raw.id,
+      createdOn: raw.created_on ?? undefined,
+      modifiedOn: raw.modified_on ?? undefined,
+      handlers: raw.handlers || [],
+      routes: (raw.routes || []).map((route: any) => ({ id: route.id, pattern: route.pattern })),
+      lastDeployedFrom: raw.last_deployed_from ?? undefined,
+      compatibilityDate: raw.compatibility_date ?? undefined,
+      hasAssets: raw.has_assets ?? undefined,
+      logpush: raw.logpush ?? undefined,
+    };
+  }
+
+  async listWorkerScripts(credentials: CloudflareCredentials): Promise<WorkerScript[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/scripts`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker scripts");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Worker scripts");
+    }
+    return (response.data.result || []).map((script: any) => this.mapWorkerScript(script));
+  }
+
+  async deleteWorkerScript(credentials: CloudflareCredentials, scriptName: string): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/workers/scripts/${scriptName}`, {
+        params: { force: true },
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Worker script");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Worker script");
+    }
+  }
+
+  async getWorkersSubdomain(credentials: CloudflareCredentials): Promise<string | null> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/subdomain`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Workers subdomain");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Workers subdomain");
+    }
+    return response.data.result?.subdomain ?? null;
+  }
+
+  async listWorkerRoutes(credentials: CloudflareCredentials, zoneId: string): Promise<WorkerRoute[]> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/zones/${zoneId}/workers/routes`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker routes");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Worker routes");
+    }
+    return (response.data.result || []).map((route: any) => ({
+      id: route.id,
+      pattern: route.pattern,
+      script: route.script ?? undefined,
+    }));
+  }
+
+  async createWorkerRoute(
+    credentials: CloudflareCredentials,
+    zoneId: string,
+    pattern: string,
+    script: string,
+  ): Promise<WorkerRoute> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(`/zones/${zoneId}/workers/routes`, { pattern, script });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to create Worker route");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to create Worker route");
+    }
+    const result = response.data.result;
+    return {
+      id: result?.id,
+      pattern: result?.pattern ?? pattern,
+      script: result?.script ?? script,
+    };
+  }
+
+  async deleteWorkerRoute(credentials: CloudflareCredentials, zoneId: string, routeId: string): Promise<void> {
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/zones/${zoneId}/workers/routes/${routeId}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Worker route");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Worker route");
+    }
+  }
+
+  /**
+   * Module workers trả multipart/form-data — lấy body của part ĐẦU TIÊN
+   * (giữa dòng trống sau part headers và dòng boundary kế tiếp).
+   * Service-worker scripts trả raw JS nên giữ nguyên.
+   */
+  private extractMultipartFirstPart(body: string): string {
+    const firstLine = (body.split(/\r?\n/, 1)[0] ?? "").trimEnd();
+    if (!firstLine.startsWith("--")) return body;
+    const boundary = firstLine;
+    const lines = body.replace(/\r\n/g, "\n").split("\n");
+    let i = 1;
+    // Bỏ qua part headers cho tới dòng trống đầu tiên
+    while (i < lines.length && lines[i].trim() !== "") i += 1;
+    i += 1; // bỏ qua chính dòng trống
+    const bodyLines: string[] = [];
+    for (; i < lines.length; i += 1) {
+      if (lines[i].startsWith(boundary)) break;
+      bodyLines.push(lines[i]);
+    }
+    return bodyLines.join("\n");
+  }
+
+  async getWorkerScriptContent(credentials: CloudflareCredentials, scriptName: string): Promise<string> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/scripts/${scriptName}/content/v2`, {
+        responseType: "text",
+        transformResponse: [(d) => d],
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker script content");
+    }
+    const raw = typeof response.data === "string" ? response.data : String(response.data ?? "");
+    return this.extractMultipartFirstPart(raw);
+  }
+
+  async getWorkerSchedules(credentials: CloudflareCredentials, scriptName: string): Promise<string[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/scripts/${scriptName}/schedules`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker schedules");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Worker schedules");
+    }
+    return (response.data.result?.schedules || []).map((item: any) => item.cron as string);
+  }
+
+  async putWorkerSchedules(
+    credentials: CloudflareCredentials,
+    scriptName: string,
+    crons: string[],
+  ): Promise<string[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.put(
+        `/accounts/${accountId}/workers/scripts/${scriptName}/schedules`,
+        crons.map((cron) => ({ cron })),
+      );
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to update Worker schedules");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to update Worker schedules");
+    }
+    const schedules = response.data.result?.schedules;
+    return Array.isArray(schedules) ? schedules.map((item: any) => item.cron as string) : crons;
+  }
+
+  async getWorkerSubdomainSetting(
+    credentials: CloudflareCredentials,
+    scriptName: string,
+  ): Promise<WorkerSubdomainSetting> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker subdomain setting");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Worker subdomain setting");
+    }
+    return {
+      enabled: Boolean(response.data.result?.enabled),
+      previewsEnabled: response.data.result?.previews_enabled ?? undefined,
+    };
+  }
+
+  async setWorkerSubdomainSetting(
+    credentials: CloudflareCredentials,
+    scriptName: string,
+    enabled: boolean,
+  ): Promise<WorkerSubdomainSetting> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(`/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`, {
+        enabled,
+        previews_enabled: enabled,
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to update Worker subdomain setting");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to update Worker subdomain setting");
+    }
+    return {
+      enabled: response.data.result?.enabled ?? enabled,
+      previewsEnabled: response.data.result?.previews_enabled ?? enabled,
+    };
+  }
+
+  async listWorkerSecrets(credentials: CloudflareCredentials, scriptName: string): Promise<WorkerSecret[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/workers/scripts/${scriptName}/secrets`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Worker secrets");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Worker secrets");
+    }
+    return (response.data.result || []).map((secret: any) => ({
+      name: secret.name,
+      type: secret.type ?? undefined,
+    }));
+  }
+
+  async putWorkerSecret(
+    credentials: CloudflareCredentials,
+    scriptName: string,
+    name: string,
+    text: string,
+  ): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.put(`/accounts/${accountId}/workers/scripts/${scriptName}/secrets`, {
+        name,
+        text,
+        type: "secret_text",
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to save Worker secret");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to save Worker secret");
+    }
+  }
+
+  async deleteWorkerSecret(
+    credentials: CloudflareCredentials,
+    scriptName: string,
+    secretName: string,
+  ): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/workers/scripts/${scriptName}/secrets/${secretName}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Worker secret");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Worker secret");
+    }
+  }
+
+  // ---- Pages (account-scoped projects) ----
+
+  private mapPagesDeployment(raw: any): PagesDeployment {
+    return {
+      id: raw.id,
+      environment: raw.environment ?? undefined,
+      url: raw.url ?? undefined,
+      createdOn: raw.created_on ?? undefined,
+      modifiedOn: raw.modified_on ?? undefined,
+      branch: raw.deployment_trigger?.metadata?.branch ?? undefined,
+      commitHash: raw.deployment_trigger?.metadata?.commit_hash ?? undefined,
+      status: raw.latest_stage?.status ?? undefined,
+    };
+  }
+
+  private mapPagesProject(raw: any): PagesProject {
+    return {
+      name: raw.name,
+      subdomain: raw.subdomain ?? undefined,
+      domains: raw.domains || [],
+      createdOn: raw.created_on ?? undefined,
+      productionBranch: raw.production_branch ?? undefined,
+      latestDeployment: raw.latest_deployment ? this.mapPagesDeployment(raw.latest_deployment) : null,
+    };
+  }
+
+  async listPagesProjects(credentials: CloudflareCredentials): Promise<PagesProject[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/pages/projects`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Pages projects");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Pages projects");
+    }
+    return (response.data.result || []).map((project: any) => this.mapPagesProject(project));
+  }
+
+  async listPagesDeployments(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    page = 1,
+  ): Promise<{ deployments: PagesDeployment[]; page: number; totalPages: number; totalCount: number }> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/pages/projects/${projectName}/deployments`, {
+        params: { page, per_page: 25 },
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Pages deployments");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Pages deployments");
+    }
+    const deployments = (response.data.result || []).map((deployment: any) => this.mapPagesDeployment(deployment));
+    const info = response.data.result_info ?? {};
+    return {
+      deployments,
+      page,
+      totalPages: typeof info.total_pages === "number" ? info.total_pages : 1,
+      totalCount: typeof info.total_count === "number" ? info.total_count : deployments.length,
+    };
+  }
+
+  async rollbackPagesDeployment(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    deploymentId: string,
+  ): Promise<PagesDeployment> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(
+        `/accounts/${accountId}/pages/projects/${projectName}/deployments/${deploymentId}/rollback`,
+      );
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to rollback Pages deployment");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to rollback Pages deployment");
+    }
+    return this.mapPagesDeployment(response.data.result);
+  }
+
+  async listPagesDomains(credentials: CloudflareCredentials, projectName: string): Promise<PagesDomain[]> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/pages/projects/${projectName}/domains`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Pages domains");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Pages domains");
+    }
+    return (response.data.result || []).map((domain: any) => ({
+      id: domain.id ?? undefined,
+      name: domain.name,
+      status: domain.status ?? undefined,
+    }));
+  }
+
+  async getPagesProject(credentials: CloudflareCredentials, projectName: string): Promise<PagesProjectDetail> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.get(`/accounts/${accountId}/pages/projects/${projectName}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to fetch Pages project");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to fetch Pages project");
+    }
+    const result = response.data.result;
+    const rawEnvVars = result?.deployment_configs?.production?.env_vars ?? {};
+    const envVars: PagesEnvVar[] = Object.entries(rawEnvVars)
+      .filter(([, entry]) => entry != null)
+      .map(([key, entry]: [string, any]) => {
+        const secret = entry?.type === "secret_text";
+        // Secret không bao giờ trả value về client — chỉ đánh dấu secret: true.
+        return { key, value: secret ? "" : String(entry?.value ?? ""), secret };
+      });
+    return {
+      name: result?.name ?? projectName,
+      productionBranch: result?.production_branch ?? undefined,
+      envVars,
+    };
+  }
+
+  async patchPagesEnvVars(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    envVars: PagesEnvVar[],
+    removedKeys: string[] = [],
+  ): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    const env_vars: Record<string, { value: string; type: string } | null> = {};
+    for (const item of envVars) {
+      env_vars[item.key] = { value: item.value, type: item.secret ? "secret_text" : "plain_text" };
+    }
+    // Cloudflare xoá biến bằng cách set key: null trong PATCH.
+    for (const key of removedKeys) {
+      env_vars[key] = null;
+    }
+    let response;
+    try {
+      response = await client.patch(`/accounts/${accountId}/pages/projects/${projectName}`, {
+        deployment_configs: { production: { env_vars } },
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to update Pages environment variables");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to update Pages environment variables");
+    }
+  }
+
+  async retryPagesDeployment(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    deploymentId: string,
+  ): Promise<PagesDeployment> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(
+        `/accounts/${accountId}/pages/projects/${projectName}/deployments/${deploymentId}/retry`,
+      );
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to retry Pages deployment");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to retry Pages deployment");
+    }
+    return this.mapPagesDeployment(response.data.result);
+  }
+
+  async deletePagesDeployment(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    deploymentId: string,
+  ): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(
+        `/accounts/${accountId}/pages/projects/${projectName}/deployments/${deploymentId}`,
+        { params: { force: true } },
+      );
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Pages deployment");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Pages deployment");
+    }
+  }
+
+  /** Deletes every deployment, attempting the live production one last. Returns per-deployment outcome counts. */
+  async deleteAllPagesDeployments(
+    credentials: CloudflareCredentials,
+    projectName: string,
+  ): Promise<{ deleted: number; failed: number }> {
+    const first = await this.listPagesDeployments(credentials, projectName, 1);
+    const all = [...first.deployments];
+    const maxPages = Math.min(first.totalPages, 40);
+    for (let page = 2; page <= maxPages; page++) {
+      const next = await this.listPagesDeployments(credentials, projectName, page);
+      if (next.deployments.length === 0) break;
+      all.push(...next.deployments);
+    }
+    // Delete the live production deployment last — Cloudflare may reject it while others exist.
+    const liveProductionId = first.deployments.find((d) => d.environment === "production")?.id;
+    const ordered = [
+      ...all.filter((d) => d.id !== liveProductionId),
+      ...all.filter((d) => d.id === liveProductionId),
+    ];
+    let deleted = 0;
+    let failed = 0;
+    for (const deployment of ordered) {
+      try {
+        await this.deletePagesDeployment(credentials, projectName, deployment.id);
+        deleted++;
+      } catch {
+        failed++;
+      }
+    }
+    return { deleted, failed };
+  }
+
+  async deletePagesProject(credentials: CloudflareCredentials, projectName: string): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/pages/projects/${projectName}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Pages project");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Pages project");
+    }
+  }
+
+  async addPagesDomain(
+    credentials: CloudflareCredentials,
+    projectName: string,
+    domain: string,
+  ): Promise<PagesDomain> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.post(`/accounts/${accountId}/pages/projects/${projectName}/domains`, {
+        name: domain,
+      });
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to add Pages domain");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to add Pages domain");
+    }
+    const result = response.data.result;
+    return {
+      id: result?.id ?? undefined,
+      name: result?.name ?? domain,
+      status: result?.status ?? undefined,
+    };
+  }
+
+  async deletePagesDomain(credentials: CloudflareCredentials, projectName: string, domain: string): Promise<void> {
+    const accountId = await this.resolveAccountId(credentials);
+    const client = this.createClient(credentials);
+    let response;
+    try {
+      response = await client.delete(`/accounts/${accountId}/pages/projects/${projectName}/domains/${domain}`);
+    } catch (error) {
+      throw this.toCloudflareError(error, "Failed to delete Pages domain");
+    }
+    if (!response.data.success) {
+      throw this.createCloudflareApiError(response.data, "Failed to delete Pages domain");
     }
   }
 }

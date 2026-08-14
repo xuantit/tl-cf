@@ -15,6 +15,7 @@ import { useAuthStore, getRoleFromToken, getEmailFromToken } from '../stores/use
 import { useThemeStore } from '../stores/useThemeStore'
 import { useCommandPalette } from '../stores/useCommandPalette'
 import { useSelectionMode } from '../stores/useSelectionMode'
+import { useFocusMode } from '../stores/useFocusMode'
 import AccountSwitcher from '../components/AccountSwitcher'
 import CommandPalette from '../components/CommandPalette'
 import { Kbd } from '../components/ui'
@@ -105,6 +106,8 @@ export default function AppShell() {
   const toggleTheme = useThemeStore((s) => s.toggle)
   const openPalette = useCommandPalette((s) => s.setOpen)
   const selectionOn = useSelectionMode((s) => s.on)
+  // Focus mode (trang chi tiết domain): sidebar thu lại để FunctionRail thay chỗ.
+  const focus = useFocusMode((s) => s.active)
 
   // Selection mode only makes sense on the Domains list — leave it when navigating away.
   useEffect(() => {
@@ -169,6 +172,9 @@ export default function AppShell() {
       icon: '◈',
       label: 'Domains',
       to: '/',
+      // Bấm Domains khi đang bật chế độ chọn → thoát chế độ chọn (nếu không tab
+      // Select cứ sáng mãi và người dùng tưởng nav hỏng).
+      onClick: () => useSelectionMode.getState().setOn(false),
       active: isNavActive('/', location.pathname) && !selectionOn,
     },
     { key: 'select', icon: '☑', label: t('Select'), onClick: onSelectTab, active: selectionOn },
@@ -178,7 +184,7 @@ export default function AppShell() {
       icon: '⋯',
       label: t('More'),
       to: '/more',
-      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/analytics', '/overview'].some(
+      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/analytics', '/overview', '/workers', '/tunnels'].some(
         (p) => isNavActive(p, location.pathname),
       ),
     },
@@ -186,8 +192,14 @@ export default function AppShell() {
 
   return (
     <div className="flex h-dvh bg-bg">
-      {/* Desktop sidebar (.side) */}
-      <aside className="hidden w-[264px] shrink-0 flex-col border-r border-stroke bg-bg-side px-[11px] py-[11px] lg:flex">
+      {/* Desktop sidebar (.side) — thu về w-0 khi focus mode để rail chức năng chiếm mép trái */}
+      <aside
+        className={`hidden shrink-0 flex-col overflow-hidden border-stroke bg-bg-side py-[11px] transition-[width,padding] duration-200 lg:flex ${
+          focus ? 'w-0 border-r-0 px-0' : 'w-[264px] border-r px-[11px]'
+        }`}
+      >
+        {/* Wrapper giữ bề rộng cố định để nội dung không bị bóp méo khi sidebar đóng, chỉ bị cắt */}
+        <div className="flex h-full w-[242px] flex-col">
         {/* Brand */}
         <Link to="/" className="flex items-center gap-[7px] px-[5px] pt-[3px] pb-[7px]">
           <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-[5px] bg-accent text-[12px] text-white">
@@ -263,6 +275,7 @@ export default function AppShell() {
             <span className="truncate font-mono text-[12px] text-fg-2">{email}</span>
           </button>
         </Dropdown>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">

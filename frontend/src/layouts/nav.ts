@@ -18,6 +18,8 @@ export const NAV_ITEMS: NavEntry[] = [
   { path: '/history', icon: '◷', label: 'History' },
   { path: '/tags', icon: '⊘', label: 'Tags' },
   { path: '/analytics', icon: '◱', label: 'Analytics' },
+  { path: '/workers', icon: 'ƒ', label: 'Workers & Pages' },
+  { path: '/tunnels', icon: '⇌', label: 'Tunnels' },
   { path: '/accounts', icon: '⌂', label: 'Accounts', section: 'account' },
   { path: '/settings', icon: '⚙', label: 'Settings', section: 'account' },
   { path: '/users', icon: '◉', label: 'Users', adminOnly: true },

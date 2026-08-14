@@ -70,19 +70,54 @@
 - Global API Key luôn có đủ quyền; chỉ API Token scoped mới cần thêm quyền này.
 - Dữ liệu analytics được cache 60 giây phía backend để tránh rate limit.
 
+### 7. **Workers & Pages (trang Workers & Pages)**
+
+**Endpoints:**
+- Workers scripts: `GET/DELETE /accounts/{account_id}/workers/scripts`, `GET .../scripts/{name}/content/v2`, `GET/PUT .../scripts/{name}/schedules`, `GET/POST .../scripts/{name}/subdomain`, `GET/PUT/DELETE .../scripts/{name}/secrets`
+- Worker routes theo zone: `GET/POST/DELETE /zones/{zone_id}/workers/routes`
+- Pages: `GET/DELETE /accounts/{account_id}/pages/projects` (+ `/deployments`, `/rollback`, `/retry`, `/domains`, PATCH env vars)
+
+**Quyền yêu cầu:**
+- ✅ **Account → Workers Scripts → Edit** (list/xoá script, đọc code, cron, subdomain, secrets)
+- ✅ **Zone → Workers Routes → Edit** (quản lý route theo zone)
+- ✅ **Account → Cloudflare Pages → Edit** (projects, deployments, rollback/retry, xoá project, domains, env vars)
+- ✅ **Account → Account Settings → Read** (resolve account_id tự động)
+
+**Lưu ý:**
+- Xoá deployment production **đang live** sẽ bị CF từ chối — muốn dọn sạch phải xoá cả project (tool có nút "Xoá tất cả" + "Xoá project").
+- Worker secrets là write-only: API không bao giờ trả về giá trị secret.
+
+### 8. **Cloudflare Tunnels (trang Tunnels)**
+
+**Endpoints:** `GET/POST/DELETE /accounts/{account_id}/cfd_tunnel` (+ `/configurations`, `/token`, `/connections`)
+
+**Quyền yêu cầu:**
+- ✅ **Account → Cloudflare Tunnel → Edit**
+- ✅ **Zone → DNS → Edit** (tự tạo CNAME `{tunnel_id}.cfargotunnel.com` khi thêm public hostname)
+- ✅ **Account → Account Settings → Read** (resolve account_id tự động)
+
+**Lưu ý:**
+- Token tunnel là bí mật (ai có token là chạy được connector) — tool chỉ hiển thị khi bấm Reveal và ghi audit log, không bao giờ ghi token vào log.
+- Tunnel tạo qua tool là remotely-managed (`config_src: cloudflare`) — cấu hình ingress quản lý từ dashboard/tool, không cần file config.yml phía connector.
+
 ## Checklist quyền đầy đủ
 
 Để tool hoạt động đầy đủ, API Token cần có:
 
 ### Account Level:
 - ✅ Account → Account Settings → Edit (cho Argo Tiered Caching)
+- ✅ Account → Account Settings → Read (resolve account_id cho Workers/Pages/Tunnels)
+- ✅ Account → Workers Scripts → Edit (trang Workers)
+- ✅ Account → Cloudflare Pages → Edit (trang Pages)
+- ✅ Account → Cloudflare Tunnel → Edit (trang Tunnels)
 
 ### Zone Level:
 - ✅ Zone → Zone → Edit (cho zone creation và general operations)
 - ✅ Zone → Zone Settings → Edit (cho SSL mode, cache settings, Tiered Cache)
 - ✅ Zone → Cache Rules → Edit (cho Cache Rules)
-- ✅ Zone → DNS → Edit (cho DNS management)
+- ✅ Zone → DNS → Edit (cho DNS management + auto-CNAME của Tunnels)
 - ✅ Zone → Analytics → Read (cho trang Analytics)
+- ✅ Zone → Workers Routes → Edit (cho Worker routes theo zone)
 
 ### Account Rulesets (cho Cache Rules):
 - ✅ Account → Rulesets → Edit

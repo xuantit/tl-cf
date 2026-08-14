@@ -1,27 +1,28 @@
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Popconfirm, Select, Table } from 'antd'
 import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import ModernRulesPanel from '../../components/rules/ModernRulesPanel'
+import RulesetRulesPanel from '../../components/rules/RulesetRulesPanel'
 import PageRuleFormModal from '../../components/rules/PageRuleFormModal'
 import type { PageRuleInput } from '../../components/rules/pageRulePresets'
-import { SectionHeader, Tag } from '../../components/ui'
+import { DetailPanel, EmptyState, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
 import { api, apiErrorDetail } from '../../services/api'
 import type { PageRule } from '../../types/domain'
 
 /**
- * Rules tab — thin wrapper around ModernRulesPanel (its logic and tests stay
- * untouched) plus the legacy Page Rules sub-view kept behind ?sub=legacy so
- * the /rules?zone= redirect contract still lands somewhere meaningful.
+ * Rules tab — Page Rules (Legacy) + Redirect Rules + Configuration Rules.
+ *
+ * Cache Rules thuộc tab Cache (cùng chỗ với các thiết lập cache khác), nên link
+ * cũ dạng ?tab=rules&kind=cache được chuyển hướng sang tab Cache.
  */
 export default function RulesTab({ zoneId, zoneName }: { zoneId: string; zoneName?: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const sub = searchParams.get('sub') === 'legacy' ? 'legacy' : 'modern'
   const activeModal = searchParams.get('modal')
   const editId = searchParams.get('edit')
 
@@ -38,6 +39,13 @@ export default function RulesTab({ zoneId, zoneName }: { zoneId: string; zoneNam
       { replace: true },
     )
   }
+
+  // Tương thích ngược: Cache Rules đã chuyển sang tab Cache.
+  const kindParam = searchParams.get('kind')
+  useEffect(() => {
+    if (kindParam === 'cache') setParams({ tab: 'cache' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kindParam])
 
   const { data: rules = [], isLoading } = useQuery<PageRule[]>({
     queryKey: ['rules', zoneId],
@@ -98,6 +106,8 @@ export default function RulesTab({ zoneId, zoneName }: { zoneId: string; zoneNam
         actions: editingRule.actions,
       }
     : undefined
+
+  const legacyPanelOpen = activeModal === 'rule-add' || !!editingRule
 
   const legacyColumns: ColumnsType<PageRule> = [
     {
@@ -175,78 +185,83 @@ export default function RulesTab({ zoneId, zoneName }: { zoneId: string; zoneNam
   return (
     <>
       <SectionHeader
-        title={sub === 'legacy' ? `${t('Page rules')} · ${rules.length} / 20` : t('Rules')}
+        title={`${t('Page rules')} · ${rules.length} / 20`}
         actions={
-          <div className="flex gap-[6px]">
-            <button
-              type="button"
-              onClick={() => setParams({ sub: null, modal: null, edit: null, kind: null })}
-              className={`cursor-pointer rounded-[4px] border border-solid px-2 py-1 font-mono text-[11.5px] leading-none transition-colors ${
-                sub === 'modern'
-                  ? 'border-fg bg-fg text-bg'
-                  : 'border-stroke bg-transparent text-fg-2 hover:text-fg'
-              }`}
-            >
-              {t('Modern')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setParams({ sub: 'legacy', modal: null, edit: null, kind: null })}
-              className={`cursor-pointer rounded-[4px] border border-solid px-2 py-1 font-mono text-[11.5px] leading-none transition-colors ${
-                sub === 'legacy'
-                  ? 'border-fg bg-fg text-bg'
-                  : 'border-stroke bg-transparent text-fg-2 hover:text-fg'
-              }`}
-            >
-              {t('Page Rules (Legacy)')}
-            </button>
-          </div>
-        }
-      />
-
-      {sub === 'modern' ? (
-        <div className="pt-3">{zoneId && <ModernRulesPanel zoneId={zoneId} />}</div>
-      ) : (
-        <div className="pt-3">
-          <Button
-            type="primary"
-            className="mb-3"
-            onClick={() => setParams({ modal: 'rule-add', edit: null })}
-          >
+          /* Nút cấp section = outline để phân tầng với hành động chính ở fx-head */
+          <Button size="small" onClick={() => setParams({ modal: 'rule-add', edit: null })}>
             + {t('Add Page Rule')}
           </Button>
+        }
+      />
+      <div className="flex">
+        <div className="min-w-0 flex-1 pt-3 pb-6">
+          {isLoading ? (
+            <div className="flex flex-col gap-[13px] px-1 py-3" data-testid="page-rules-skeleton">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SkeletonLine key={i} width={`${88 - i * 14}%`} />
+              ))}
+            </div>
+          ) : rules.length === 0 ? (
+            <EmptyState
+              icon="⊞"
+              title={t('No page rules')}
+              desc={t('Create the first rule with the button above')}
+              className="!py-[24px]"
+            />
+          ) : (
           <Table
-            loading={isLoading}
             dataSource={rules}
             rowKey="id"
             columns={legacyColumns}
             pagination={false}
-            scroll={{ x: 'max-content' }}
+            size="small"
+            scroll={{ x: 560 }}
+            onRow={(record) => ({
+              onClick: (event) => {
+                // Bỏ qua click vào Select trạng thái / nút Edit-Delete / popconfirm
+                const target = event.target as HTMLElement
+                if (target.closest('button, .ant-select, .ant-popover')) return
+                setParams({ modal: 'rule-edit', edit: record.id })
+              },
+              style: { cursor: 'pointer' },
+            })}
+            rowClassName={(record) => (record.id === editId ? 'bg-bg-sel' : '')}
           />
+          )}
         </div>
-      )}
 
-      <PageRuleFormModal
-        open={activeModal === 'rule-add'}
-        title={t('Add Page Rule')}
-        zoneName={zoneName}
-        loading={createRule.isPending}
-        onCancel={() => setParams({ modal: null, edit: null })}
-        onSubmit={(payload) => createRule.mutate(payload)}
-      />
+        {/* Panel trượt bên phải thay cho modal — đẩy bảng co lại như design */}
+        <DetailPanel
+          open={legacyPanelOpen}
+          title={editingRule ? t('Edit Page Rule') : t('Add Page Rule')}
+          onClose={() => setParams({ modal: null, edit: null })}
+        >
+          {legacyPanelOpen && (
+            <PageRuleFormModal
+              key={editingRule?.id ?? 'new'}
+              zoneName={zoneName}
+              initialValue={editingRuleInput}
+              loading={createRule.isPending || updateRule.isPending}
+              onCancel={() => setParams({ modal: null, edit: null })}
+              onDelete={
+                editingRule
+                  ? () => {
+                      deleteRule.mutate(editingRule.id)
+                      setParams({ modal: null, edit: null })
+                    }
+                  : undefined
+              }
+              onSubmit={(payload) => {
+                if (editingRule) updateRule.mutate({ ruleId: editingRule.id, data: payload })
+                else createRule.mutate(payload)
+              }}
+            />
+          )}
+        </DetailPanel>
+      </div>
 
-      <PageRuleFormModal
-        open={!!editingRule}
-        title={t('Edit Page Rule')}
-        zoneName={zoneName}
-        initialValue={editingRuleInput}
-        loading={updateRule.isPending}
-        onCancel={() => setParams({ modal: null, edit: null })}
-        onSubmit={(payload) => {
-          if (!editingRule) return
-          updateRule.mutate({ ruleId: editingRule.id, data: payload })
-        }}
-      />
+      {zoneId && <RulesetRulesPanel zoneId={zoneId} kind="redirect" zoneName={zoneName} />}
+      {zoneId && <RulesetRulesPanel zoneId={zoneId} kind="configuration" zoneName={zoneName} />}
     </>
   )
 }
