@@ -431,10 +431,10 @@ describe('WorkersPages', () => {
         createdOn: '2026-01-01T00:00:00.000Z',
       },
     ]
-    apiGet.mockImplementation(async (url: string, config?: { params?: { page?: number } }) => {
+    apiGet.mockImplementation(async (url: string, config?: unknown) => {
+      const page = (config as { params?: { page?: number } } | undefined)?.params?.page ?? 1
       if (url === '/pages/projects') return { data: { projects } }
       if (url === '/pages/projects/my-site/deployments') {
-        const page = config?.params?.page ?? 1
         return {
           data: page === 1
             ? { deployments, page: 1, totalPages: 2, totalCount: 28 }

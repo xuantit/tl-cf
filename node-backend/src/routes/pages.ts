@@ -190,10 +190,22 @@ pagesRouter.post("/projects/:projectName/deployments/:deploymentId/retry", async
 });
 
 // DELETE /api/pages/projects/:projectName/deployments — deletes all deployments, live production last
+// Request nặng (tới ~1000 CF calls, chạy nhiều phút) → mỗi user chỉ được 1 lần chạy đồng thời.
+const deleteAllInFlight = new Set<string>();
+
 pagesRouter.delete("/projects/:projectName/deployments", async (req, res) => {
   const auth = req.auth as AuthUser;
   const { projectName } = req.params;
   const { accountId, label } = credentialSelector(req);
+  const flightKey = auth.userId;
+  if (deleteAllInFlight.has(flightKey)) {
+    return res.status(409).json({
+      code: "DELETE_ALL_IN_PROGRESS",
+      detail: "A delete-all operation is already running — wait for it to finish",
+      retryable: true,
+    });
+  }
+  deleteAllInFlight.add(flightKey);
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const result = await cloudflareService.deleteAllPagesDeployments(credentials, projectName);
@@ -204,6 +216,8 @@ pagesRouter.delete("/projects/:projectName/deployments", async (req, res) => {
       code: "PAGES_DEPLOYMENTS_DELETE_ALL_FAILED",
       detail: "Failed to delete Pages deployments",
     });
+  } finally {
+    deleteAllInFlight.delete(flightKey);
   }
 });
 
