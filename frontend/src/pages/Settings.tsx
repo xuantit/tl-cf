@@ -200,7 +200,7 @@ function AppearanceTab() {
           onChange={(value) => setDensity(value as TableDensity)}
           options={[
             { value: 'compact', label: t('Dense') },
-            { value: 'comfortable', label: t('Medium') },
+            { value: 'comfortable', label: t('Comfortable') },
             { value: 'spacious', label: t('Spacious') },
           ]}
         />

@@ -138,7 +138,7 @@ function ConfirmBody({
       {requireTyping && (
         <>
           <label className="mb-1.5 block font-mono text-[11px] tracking-[.08em] text-fg-3 uppercase">
-            {t('Type')} <span className="normal-case text-danger">{confirmText}</span> {t('to confirm')}
+            {t('Enter')} <span className="normal-case text-danger">{confirmText}</span> {t('to confirm')}
           </label>
           <Input
             autoFocus
