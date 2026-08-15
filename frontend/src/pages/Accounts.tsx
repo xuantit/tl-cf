@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Button, Form, Input, Segmented, Alert, Typography, Dropdown, Modal } from 'antd'
+import { Table, Button, Form, Input, Segmented, Alert, Typography, Modal } from 'antd'
 import type { FormInstance } from 'antd'
 import { message, modal } from '../lib/antdApp'
 import { useSearchParams } from 'react-router-dom'
@@ -136,6 +136,8 @@ export default function Accounts() {
   const setActiveAccountId = useAccountStore((s) => s.setActiveAccountId)
   // Per-session connection test results (id → result + timestamp)
   const [lastTest, setLastTest] = useState<Record<string, { valid: boolean; at: number }>>({})
+  // Account đang mở modal hành động — click cả dòng để mở (dễ bấm trên mobile)
+  const [actionFor, setActionFor] = useState<Account | null>(null)
 
   // Modal state lives in the URL so F5 restores the view
   const addOpen = searchParams.get('modal') === 'add'
@@ -304,29 +306,17 @@ export default function Accounts() {
       width: 44,
       align: 'right',
       render: (_v, r) => (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'select', label: t('Select'), disabled: r.id === activeAccountId },
-              { key: 'test', label: t('Test connection') },
-              { key: 'toggle', label: r.isActive ? t('Disable') : t('Enable') },
-              { type: 'divider' },
-              { key: 'delete', label: t('Delete'), danger: true },
-            ],
-            onClick: ({ key, domEvent }) => {
-              domEvent.stopPropagation()
-              if (key === 'select') setActiveAccountId(r.id)
-              if (key === 'test') testConnection.mutate(r.id)
-              if (key === 'toggle') toggleActive.mutate(r)
-              if (key === 'delete') confirmDelete(r)
-            },
+        <Button
+          size="small"
+          type="text"
+          aria-label={t('Account actions')}
+          onClick={(e) => {
+            e.stopPropagation()
+            setActionFor(r)
           }}
         >
-          <Button size="small" type="text" aria-label={t('Account actions')}>
-            ⋯
-          </Button>
-        </Dropdown>
+          ⋯
+        </Button>
       ),
     },
   ]
@@ -347,7 +337,14 @@ export default function Accounts() {
         dataSource={list}
         rowKey="id"
         columns={columns}
-        rowClassName={(r) => (r.id === activeAccountId ? 'bg-bg-sel' : '')}
+        rowClassName={(r) => `cursor-pointer ${r.id === activeAccountId ? 'bg-bg-sel' : ''}`}
+        onRow={(r) => ({
+          onClick: (event) => {
+            const target = event.target as HTMLElement
+            if (target.closest('button')) return
+            setActionFor(r)
+          },
+        })}
         locale={{
           emptyText: (
             <EmptyState
@@ -367,6 +364,77 @@ export default function Accounts() {
       />
 
       {activeAccountId && <CapabilitiesSection accountId={activeAccountId} />}
+
+      {/* Modal hành động theo account — mở khi click cả dòng */}
+      <Modal
+        title={actionFor ? actionFor.label || actionFor.email || actionFor.id.slice(0, 8) : ''}
+        open={actionFor !== null}
+        onCancel={() => setActionFor(null)}
+        footer={null}
+        width={400}
+      >
+        {actionFor && (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-[6px] border border-solid border-stroke-2 px-3">
+              <KvRow k={t('Type')} v={actionFor.authType === 'apiToken' ? 'API Token' : 'Global Key'} />
+              <KvRow k={t('Email / Token')} v={actionFor.email || '•••'} />
+              <KvRow k={t('Zones')} v={String(actionFor.domainsCount ?? '—')} />
+              <KvRow
+                k={t('Status')}
+                v={
+                  actionFor.id === activeAccountId ? (
+                    <Tag variant="ok">{t('in use')}</Tag>
+                  ) : actionFor.isActive ? (
+                    <Tag>{t('ready')}</Tag>
+                  ) : (
+                    <Tag variant="warn">{t('disabled')}</Tag>
+                  )
+                }
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                type="primary"
+                block
+                disabled={actionFor.id === activeAccountId}
+                onClick={() => {
+                  setActiveAccountId(actionFor.id)
+                  setActionFor(null)
+                }}
+              >
+                {actionFor.id === activeAccountId ? t('in use') : t('Select')}
+              </Button>
+              <Button
+                block
+                loading={testConnection.isPending}
+                onClick={() => testConnection.mutate(actionFor.id)}
+              >
+                {t('Test connection')}
+              </Button>
+              <Button
+                block
+                loading={toggleActive.isPending}
+                onClick={() => {
+                  toggleActive.mutate(actionFor)
+                  setActionFor(null)
+                }}
+              >
+                {actionFor.isActive ? t('Disable') : t('Enable')}
+              </Button>
+              <Button
+                danger
+                block
+                onClick={() => {
+                  setActionFor(null)
+                  confirmDelete(actionFor)
+                }}
+              >
+                {t('Delete')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <AddAccountPanel
         open={addOpen}
