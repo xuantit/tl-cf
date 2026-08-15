@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Button, Form, Input, Modal, Segmented, Alert, Typography, Dropdown } from 'antd'
+import { Table, Button, Form, Input, Segmented, Alert, Typography, Dropdown, Modal } from 'antd'
+import type { FormInstance } from 'antd'
 import { message, modal } from '../lib/antdApp'
 import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
@@ -153,6 +154,12 @@ export default function Accounts() {
       },
       { replace: true },
     )
+  }
+
+  // Panel children stay mounted — reset the form here, not in an effect
+  const closeAddPanel = () => {
+    setAddOpen(false)
+    form.resetFields()
   }
 
   const { data: list = [], isLoading } = useQuery<Account[]>({
@@ -361,110 +368,141 @@ export default function Accounts() {
 
       {activeAccountId && <CapabilitiesSection accountId={activeAccountId} />}
 
-      <Modal
-        title={t('Add Cloudflare account')}
+      <AddAccountPanel
         open={addOpen}
-        onCancel={() => setAddOpen(false)}
-        footer={null}
-        destroyOnHidden
-      >
-        <Segmented
-          block
-          value={authType}
-          onChange={(value) => {
-            const next = new URLSearchParams(searchParams)
-            next.set('mode', value as string)
-            setSearchParams(next, { replace: true })
-          }}
-          options={[
-            { label: t('API Token (recommended)'), value: 'apiToken' },
-            { label: 'Global API Key', value: 'globalApiKey' },
-          ]}
-          style={{ marginBottom: 16 }}
-        />
-        {authType === 'apiToken' ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={t('How to get an API Token')}
-            description={
-              <ol style={{ paddingLeft: 18, margin: 0 }}>
-                <li>
-                  {t('Open')}{' '}
-                  <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
-                    dash.cloudflare.com/profile/api-tokens
-                  </Typography.Link>
-                </li>
-                <li>{t('Click "Create Token" → use the "Edit zone DNS" template (or Custom token)')}</li>
-                <li>{t('Grant permissions: Zone → DNS → Edit, and Zone → Zone → Read')}</li>
-                <li>{t('Under "Zone Resources" choose All zones (or specific zones)')}</li>
-                <li>{t('Click "Continue to summary" → "Create Token", then copy the token')}</li>
-                <li>{t('Paste the token below (it is shown only once by Cloudflare)')}</li>
-              </ol>
-            }
-          />
-        ) : (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={t('How to get your Global API Key')}
-            description={
-              <ol style={{ paddingLeft: 18, margin: 0 }}>
-                <li>
-                  {t('Open')}{' '}
-                  <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
-                    dash.cloudflare.com/profile/api-tokens
-                  </Typography.Link>
-                </li>
-                <li>{t('In the "API Keys" section, next to "Global API Key" click "View"')}</li>
-                <li>{t('Confirm your password to reveal the key, then copy it')}</li>
-                <li>{t('Enter the email of your Cloudflare account together with the key below')}</li>
-                <li>{t('Note: the Global API Key has full account access — prefer an API Token when possible')}</li>
-              </ol>
-            }
-          />
-        )}
-        <Form form={form} layout="vertical" onFinish={(v) => create.mutate(v)}>
-          <Form.Item name="label" label={t('Friendly name')}>
-            <Input placeholder={t('e.g. Main account')} />
-          </Form.Item>
-          {authType === 'apiToken' ? (
-            <Form.Item
-              name="apiToken"
-              label="API Token"
-              rules={[{ required: true, message: t('Enter API Token') }]}
-              help={t('The token will be encrypted and stored securely')}
-            >
-              <Input.Password placeholder="Cloudflare API Token" />
-            </Form.Item>
-          ) : (
-            <>
-              <Form.Item
-                name="email"
-                label={t('Cloudflare email')}
-                rules={[{ required: true, type: 'email', message: t('Enter a valid email') }]}
-              >
-                <Input placeholder="your-email@example.com" />
-              </Form.Item>
-              <Form.Item
-                name="globalApiKey"
-                label="Global API Key"
-                rules={[{ required: true, message: t('Enter Global API Key') }]}
-                help={t('The key will be encrypted and stored securely')}
-              >
-                <Input.Password placeholder="Global API Key" />
-              </Form.Item>
-            </>
-          )}
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={create.isPending} block>
-              {t('Test & Save')}
-            </Button>
-          </Form.Item>
-        </Form>
-      </Modal>
+        mode={authType}
+        onModeChange={(value) => {
+          const next = new URLSearchParams(searchParams)
+          next.set('mode', value)
+          setSearchParams(next, { replace: true })
+        }}
+        form={form}
+        saving={create.isPending}
+        onClose={closeAddPanel}
+        onFinish={(v) => create.mutate(v)}
+      />
     </div>
+  )
+}
+
+function AddAccountPanel({
+  open,
+  mode,
+  onModeChange,
+  form,
+  saving,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  mode: 'apiToken' | 'globalApiKey'
+  onModeChange: (mode: string) => void
+  form: FormInstance
+  saving: boolean
+  onClose: () => void
+  onFinish: (values: Record<string, string>) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Modal
+      title={t('Add Cloudflare account')}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      destroyOnHidden
+    >
+      <Segmented
+        block
+        value={mode}
+        onChange={(value) => onModeChange(value as string)}
+        options={[
+          { label: t('API Token (recommended)'), value: 'apiToken' },
+          { label: 'Global API Key', value: 'globalApiKey' },
+        ]}
+        style={{ marginBottom: 16 }}
+      />
+      {mode === 'apiToken' ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('How to get an API Token')}
+          description={
+            <ol style={{ paddingLeft: 18, margin: 0 }}>
+              <li>
+                {t('Open')}{' '}
+                <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
+                  dash.cloudflare.com/profile/api-tokens
+                </Typography.Link>
+              </li>
+              <li>{t('Click "Create Token" → use the "Edit zone DNS" template (or Custom token)')}</li>
+              <li>{t('Grant permissions: Zone → DNS → Edit, and Zone → Zone → Read')}</li>
+              <li>{t('Under "Zone Resources" choose All zones (or specific zones)')}</li>
+              <li>{t('Click "Continue to summary" → "Create Token", then copy the token')}</li>
+              <li>{t('Paste the token below (it is shown only once by Cloudflare)')}</li>
+            </ol>
+          }
+        />
+      ) : (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('How to get your Global API Key')}
+          description={
+            <ol style={{ paddingLeft: 18, margin: 0 }}>
+              <li>
+                {t('Open')}{' '}
+                <Typography.Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">
+                  dash.cloudflare.com/profile/api-tokens
+                </Typography.Link>
+              </li>
+              <li>{t('In the "API Keys" section, next to "Global API Key" click "View"')}</li>
+              <li>{t('Confirm your password to reveal the key, then copy it')}</li>
+              <li>{t('Enter the email of your Cloudflare account together with the key below')}</li>
+              <li>{t('Note: the Global API Key has full account access — prefer an API Token when possible')}</li>
+            </ol>
+          }
+        />
+      )}
+      <Form form={form} layout="vertical" onFinish={onFinish}>
+        <Form.Item name="label" label={t('Friendly name')}>
+          <Input placeholder={t('e.g. Main account')} />
+        </Form.Item>
+        {mode === 'apiToken' ? (
+          <Form.Item
+            name="apiToken"
+            label="API Token"
+            rules={[{ required: true, message: t('Enter API Token') }]}
+            help={t('The token will be encrypted and stored securely')}
+          >
+            <Input.Password placeholder="Cloudflare API Token" />
+          </Form.Item>
+        ) : (
+          <>
+            <Form.Item
+              name="email"
+              label={t('Cloudflare email')}
+              rules={[{ required: true, type: 'email', message: t('Enter a valid email') }]}
+            >
+              <Input placeholder="your-email@example.com" />
+            </Form.Item>
+            <Form.Item
+              name="globalApiKey"
+              label="Global API Key"
+              rules={[{ required: true, message: t('Enter Global API Key') }]}
+              help={t('The key will be encrypted and stored securely')}
+            >
+              <Input.Password placeholder="Global API Key" />
+            </Form.Item>
+          </>
+        )}
+        <Form.Item>
+          <Button type="primary" htmlType="submit" loading={saving} block>
+            {t('Test & Save')}
+          </Button>
+        </Form.Item>
+      </Form>
+    </Modal>
   )
 }

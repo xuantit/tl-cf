@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AutoComplete, Button, Dropdown, Form, Input, Modal, Select, Switch, Table } from 'antd'
+import { AutoComplete, Button, Dropdown, Form, Input, Select, Switch, Table } from 'antd'
+import type { FormInstance } from 'antd'
 import { message } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
@@ -10,7 +11,7 @@ import { useAccountStore } from '../stores/useAccountStore'
 import type { Zone } from '../types/domain'
 import PageHeader from '../components/PageHeader'
 import ConfirmDestructive from '../components/ConfirmDestructive'
-import { Banner, Dot, EmptyState, SectionHeader, SkeletonLine, Tag } from '../components/ui'
+import { Banner, DetailPanel, Dot, EmptyState, SectionHeader, SkeletonLine, Tag } from '../components/ui'
 
 interface TagRow {
   name: string
@@ -344,7 +345,9 @@ export default function Tags() {
   ]
 
   return (
-    <div className="fade-in p-[clamp(12px,3vw,24px)]">
+    // Panels are flex siblings of the content so they push it left (DetailPanel pattern)
+    <div className="flex">
+      <div className="fade-in min-w-0 flex-1 p-[clamp(12px,3vw,24px)]">
       <PageHeader
         title="Tags"
         crumb={t('{{count}} labels · group domains for bulk operations', { count: tags.length })}
@@ -483,41 +486,6 @@ export default function Tags() {
         </table>
       )}
 
-      {/* Create / edit tag */}
-      <Modal
-        title={tagModal?.mode === 'edit' ? t('Edit tag') : t('Create tag')}
-        open={tagModal !== null}
-        onCancel={() => setTagModal(null)}
-        onOk={() => tagForm.submit()}
-        okText={t('Save')}
-        cancelText={t('Cancel')}
-        confirmLoading={saveTagMutation.isPending}
-        destroyOnHidden={false}
-      >
-        <Form form={tagForm} layout="vertical" onFinish={(values) => saveTagMutation.mutate(values)}>
-          <Form.Item
-            label={t('Tag name')}
-            name="name"
-            rules={[
-              { required: true, message: t('Please enter a tag name') },
-              { max: 40, message: t('Maximum 40 characters') },
-            ]}
-          >
-            <Input placeholder="prod" autoFocus />
-          </Form.Item>
-          <Form.Item label={t('Description')} name="description">
-            <Input placeholder={t('e.g. Production environment')} maxLength={200} />
-          </Form.Item>
-          <Form.Item label={t('Attached template')} name="templateId" help={t('Optional — suggested when applying templates to this tag')}>
-            <Select
-              allowClear
-              placeholder={t('No template')}
-              options={templates.map((tpl) => ({ value: tpl.id, label: tpl.name }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
       {/* Delete tag */}
       <ConfirmDestructive
         open={deleteTag !== null}
@@ -532,69 +500,179 @@ export default function Tags() {
         onConfirm={() => deleteTag && deleteTagMutation.mutate(deleteTag.name)}
         onCancel={() => setDeleteTag(null)}
       />
+      </div>
+
+      {/* Create / edit tag */}
+      <TagFormPanel
+        open={tagModal !== null}
+        editingName={tagModal?.mode === 'edit' ? tagModal.tag.name : null}
+        form={tagForm}
+        templates={templates}
+        saving={saveTagMutation.isPending}
+        onClose={() => setTagModal(null)}
+        onFinish={(values) => saveTagMutation.mutate(values)}
+      />
 
       {/* Create / edit rule */}
-      <Modal
-        title={ruleModal?.mode === 'edit' ? t('Edit rule') : t('New auto-tagging rule')}
+      <RuleFormPanel
         open={ruleModal !== null}
-        onCancel={() => setRuleModal(null)}
-        footer={
-          <div className="flex items-center gap-[7px]">
-            <Button onClick={runModalPreview}>{t('Preview matches')}</Button>
-            {modalPreview && (
-              <span className="font-mono text-[11px] text-fg-2">
-                {t('{{count}} zones', { count: modalPreview.matchedCount })}
-                {modalPreview.sample.length > 0 && (
-                  <span className="text-fg-3"> · {modalPreview.sample.join(', ')}</span>
-                )}
-              </span>
-            )}
-            <span className="flex-1" />
-            <Button onClick={() => setRuleModal(null)}>{t('Cancel')}</Button>
-            <Button type="primary" loading={saveRuleMutation.isPending} onClick={() => ruleForm.submit()}>
+        editingId={ruleModal?.mode === 'edit' ? ruleModal.rule.id : null}
+        form={ruleForm}
+        tagOptions={tags.map((tag) => tag.name)}
+        preview={modalPreview}
+        saving={saveRuleMutation.isPending}
+        onPreview={runModalPreview}
+        onClose={() => setRuleModal(null)}
+        onFinish={(values) => saveRuleMutation.mutate(values)}
+      />
+    </div>
+  )
+}
+
+function TagFormPanel({
+  open,
+  editingName,
+  form,
+  templates,
+  saving,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  editingName: string | null
+  form: FormInstance<TagFormValues>
+  templates: TemplateOption[]
+  saving: boolean
+  onClose: () => void
+  onFinish: (values: TagFormValues) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailPanel
+      open={open}
+      title={editingName ? t('Edit tag') : t('Create tag')}
+      onClose={onClose}
+      footer={
+        <span className="ml-auto flex gap-2">
+          <Button onClick={onClose}>{t('Cancel')}</Button>
+          <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            {t('Save')}
+          </Button>
+        </span>
+      }
+    >
+      {/* key remounts the form DOM when switching create↔edit (panel children stay mounted) */}
+      <Form key={editingName ?? 'new'} form={form} layout="vertical" onFinish={onFinish}>
+        <Form.Item
+          label={t('Tag name')}
+          name="name"
+          rules={[
+            { required: true, message: t('Please enter a tag name') },
+            { max: 40, message: t('Maximum 40 characters') },
+          ]}
+        >
+          <Input placeholder="prod" />
+        </Form.Item>
+        <Form.Item label={t('Description')} name="description">
+          <Input placeholder={t('e.g. Production environment')} maxLength={200} />
+        </Form.Item>
+        <Form.Item label={t('Attached template')} name="templateId" help={t('Optional — suggested when applying templates to this tag')}>
+          <Select
+            allowClear
+            placeholder={t('No template')}
+            options={templates.map((tpl) => ({ value: tpl.id, label: tpl.name }))}
+          />
+        </Form.Item>
+      </Form>
+    </DetailPanel>
+  )
+}
+
+function RuleFormPanel({
+  open,
+  editingId,
+  form,
+  tagOptions,
+  preview,
+  saving,
+  onPreview,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  editingId: string | null
+  form: FormInstance<RuleFormValues>
+  tagOptions: string[]
+  preview: { matchedCount: number; sample: string[] } | null
+  saving: boolean
+  onPreview: () => void
+  onClose: () => void
+  onFinish: (values: RuleFormValues) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailPanel
+      open={open}
+      title={editingId ? t('Edit rule') : t('New auto-tagging rule')}
+      onClose={onClose}
+      footer={
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button onClick={onPreview}>{t('Preview matches')}</Button>
+          {preview && (
+            <span className="font-mono text-[11px] text-fg-2">
+              {t('{{count}} zones', { count: preview.matchedCount })}
+              {preview.sample.length > 0 && (
+                <span className="text-fg-3"> · {preview.sample.join(', ')}</span>
+              )}
+            </span>
+          )}
+          <span className="ml-auto flex gap-2">
+            <Button onClick={onClose}>{t('Cancel')}</Button>
+            <Button type="primary" loading={saving} onClick={() => form.submit()}>
               {t('Save')}
             </Button>
-          </div>
-        }
-      >
-        <Form form={ruleForm} layout="vertical" onFinish={(values) => saveRuleMutation.mutate(values)}>
-          <div className="flex gap-[9px]">
-            <Form.Item label={t('Field')} name="field" className="flex-1" rules={[{ required: true }]}>
-              <Select
-                options={[
-                  { value: 'name', label: 'name' },
-                  { value: 'plan', label: 'plan' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item label={t('Condition')} name="op" className="flex-1" rules={[{ required: true }]}>
-              <Select
-                options={[
-                  { value: 'endsWith', label: 'endsWith' },
-                  { value: 'startsWith', label: 'startsWith' },
-                  { value: 'contains', label: 'contains' },
-                  { value: 'equals', label: 'equals' },
-                ]}
-              />
-            </Form.Item>
-          </div>
-          <Form.Item label={t('Value')} name="value" rules={[{ required: true, message: t('Please enter a value') }]}>
-            <Input placeholder=".shop" className="font-mono" />
-          </Form.Item>
-          <Form.Item label={t('Assign tag')} name="tag" rules={[{ required: true, message: t('Please enter a tag name') }]}>
-            <AutoComplete
-              options={tags.map((tag) => ({ value: tag.name }))}
-              placeholder="shop"
-              filterOption={(input, option) =>
-                (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-              }
+          </span>
+        </div>
+      }
+    >
+      {/* key remounts the form DOM when switching create↔edit (panel children stay mounted) */}
+      <Form key={editingId ?? 'new'} form={form} layout="vertical" onFinish={onFinish}>
+        <div className="flex gap-[9px]">
+          <Form.Item label={t('Field')} name="field" className="flex-1" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'name', label: 'name' },
+                { value: 'plan', label: 'plan' },
+              ]}
             />
           </Form.Item>
-          <Form.Item label={t('Enabled')} name="enabled" valuePropName="checked">
-            <Switch size="small" />
+          <Form.Item label={t('Condition')} name="op" className="flex-1" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'endsWith', label: 'endsWith' },
+                { value: 'startsWith', label: 'startsWith' },
+                { value: 'contains', label: 'contains' },
+                { value: 'equals', label: 'equals' },
+              ]}
+            />
           </Form.Item>
-        </Form>
-      </Modal>
-    </div>
+        </div>
+        <Form.Item label={t('Value')} name="value" rules={[{ required: true, message: t('Please enter a value') }]}>
+          <Input placeholder=".shop" className="font-mono" />
+        </Form.Item>
+        <Form.Item label={t('Assign tag')} name="tag" rules={[{ required: true, message: t('Please enter a tag name') }]}>
+          <AutoComplete
+            options={tagOptions.map((name) => ({ value: name }))}
+            placeholder="shop"
+            filterOption={(input, option) =>
+              (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+          />
+        </Form.Item>
+        <Form.Item label={t('Enabled')} name="enabled" valuePropName="checked">
+          <Switch size="small" />
+        </Form.Item>
+      </Form>
+    </DetailPanel>
   )
 }

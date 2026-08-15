@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Form, Input, Modal, Popconfirm, Select, Table } from 'antd'
+import { Button, Form, Input, Popconfirm, Select, Table } from 'antd'
+import type { FormInstance } from 'antd'
 import { message } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
@@ -18,9 +19,9 @@ import PageHeader from '../components/PageHeader'
 import BulkActionBar, { BulkActionButton } from '../components/BulkActionBar'
 import ConfirmDestructive from '../components/ConfirmDestructive'
 import BulkProgressModal from '../components/BulkProgressModal'
-import BulkAddDomainsModal, { CreateZonesDone } from '../components/domains/BulkAddDomainsModal'
-import BulkDnsReplaceModal from '../components/domains/BulkDnsReplaceModal'
-import { Dot, EmptyState, Banner, SkeletonLine, Tag } from '../components/ui'
+import BulkAddDomainsPanel, { CreateZonesDone } from '../components/domains/BulkAddDomainsModal'
+import BulkDnsReplacePanel from '../components/domains/BulkDnsReplaceModal'
+import { DetailPanel, Dot, EmptyState, Banner, SkeletonLine, Tag } from '../components/ui'
 import type { DotStatus } from '../components/ui'
 
 const STATUS_DOT: Record<string, DotStatus> = {
@@ -273,8 +274,20 @@ export default function Domains() {
     </>
   )
 
+  const closeAddPanel = () => {
+    setParams({ modal: null })
+    form.resetFields()
+  }
+
+  const closeTagsPanel = () => {
+    setParams({ modal: null })
+    setTagsToAssign([])
+  }
+
   return (
-    <div className="relative flex min-h-full flex-col">
+    // Panels are flex siblings of the content so they push it left (DetailPanel pattern)
+    <div className="relative flex min-h-full">
+      <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex-1 p-[clamp(12px,3vw,24px)]">
         <PageHeader
           title="Domains"
@@ -429,62 +442,6 @@ export default function Domains() {
         {barActions}
       </BulkActionBar>
 
-      <Modal
-        title={t('Add new domain')}
-        open={activeModal === 'add'}
-        onCancel={() => {
-          setParams({ modal: null })
-          form.resetFields()
-        }}
-        onOk={() => form.submit()}
-        okText={t('Add')}
-        cancelText={t('Cancel')}
-        confirmLoading={createMutation.isPending}
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate(values.name.trim())}>
-          <Form.Item
-            label={t('Domain name')}
-            name="name"
-            rules={[
-              { required: true, message: t('Please enter a domain name') },
-              {
-                pattern: /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/,
-                message: t('Invalid domain name (e.g. example.com)'),
-              },
-            ]}
-          >
-            <Input placeholder="example.com" size="large" autoFocus />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title={t('Assign tags')}
-        open={activeModal === 'tags'}
-        onCancel={() => setParams({ modal: null })}
-        onOk={() => assignTagsMutation.mutate(tagsToAssign)}
-        okText={t('Assign')}
-        cancelText={t('Cancel')}
-        okButtonProps={{ disabled: tagsToAssign.length === 0 }}
-        confirmLoading={assignTagsMutation.isPending}
-        destroyOnHidden
-      >
-        <p className="mb-2 text-[12.5px] text-fg-2">
-          {t('Tags will be added to the {{count}} selected domain(s).', {
-            count: selection.selected.length,
-          })}
-        </p>
-        <Select
-          mode="tags"
-          autoFocus
-          style={{ width: '100%' }}
-          placeholder={t('Choose or type new tags')}
-          value={tagsToAssign}
-          onChange={setTagsToAssign}
-          options={allTags.map((tag) => ({ value: tag, label: tag }))}
-        />
-      </Modal>
-
       <ConfirmDestructive
         open={activeModal === 'delete'}
         title={t('Delete {{count}} zones from Cloudflare?', { count: selection.selected.length })}
@@ -504,19 +461,135 @@ export default function Domains() {
         onClose={closeBulkJob}
         renderDone={(job) => (job.type === 'create-zones' ? <CreateZonesDone job={job} /> : null)}
       />
+      </div>
 
-      <BulkAddDomainsModal
+      <AddDomainPanel
+        open={activeModal === 'add'}
+        form={form}
+        saving={createMutation.isPending}
+        onClose={closeAddPanel}
+        onFinish={(values) => createMutation.mutate(values.name.trim())}
+      />
+
+      <AssignTagsPanel
+        open={activeModal === 'tags'}
+        count={selection.selected.length}
+        allTags={allTags}
+        value={tagsToAssign}
+        onChange={setTagsToAssign}
+        saving={assignTagsMutation.isPending}
+        onClose={closeTagsPanel}
+        onAssign={() => assignTagsMutation.mutate(tagsToAssign)}
+      />
+
+      <BulkAddDomainsPanel
         open={activeModal === 'bulk-add'}
         onClose={() => setParams({ modal: null })}
         onJobCreated={(id) => setParams({ modal: null, job: id })}
       />
 
-      <BulkDnsReplaceModal
+      <BulkDnsReplacePanel
         open={activeModal === 'bulk-dns'}
         onClose={() => setParams({ modal: null })}
         zoneIds={selection.selected}
         zoneNames={Object.fromEntries(domains.map((d) => [d.id, d.name]))}
       />
     </div>
+  )
+}
+
+function AddDomainPanel({
+  open,
+  form,
+  saving,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  form: FormInstance<{ name: string }>
+  saving: boolean
+  onClose: () => void
+  onFinish: (values: { name: string }) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailPanel
+      open={open}
+      title={t('Add new domain')}
+      onClose={onClose}
+      footer={
+        <span className="ml-auto flex gap-2">
+          <Button onClick={onClose}>{t('Cancel')}</Button>
+          <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            {t('Add')}
+          </Button>
+        </span>
+      }
+    >
+      <Form form={form} layout="vertical" onFinish={onFinish}>
+        <Form.Item
+          label={t('Domain name')}
+          name="name"
+          rules={[
+            { required: true, message: t('Please enter a domain name') },
+            {
+              pattern: /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/,
+              message: t('Invalid domain name (e.g. example.com)'),
+            },
+          ]}
+        >
+          <Input placeholder="example.com" size="large" />
+        </Form.Item>
+      </Form>
+    </DetailPanel>
+  )
+}
+
+function AssignTagsPanel({
+  open,
+  count,
+  allTags,
+  value,
+  onChange,
+  saving,
+  onClose,
+  onAssign,
+}: {
+  open: boolean
+  count: number
+  allTags: string[]
+  value: string[]
+  onChange: (tags: string[]) => void
+  saving: boolean
+  onClose: () => void
+  onAssign: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailPanel
+      open={open}
+      title={t('Assign tags')}
+      onClose={onClose}
+      footer={
+        <span className="ml-auto flex gap-2">
+          <Button onClick={onClose}>{t('Cancel')}</Button>
+          <Button type="primary" loading={saving} disabled={value.length === 0} onClick={onAssign}>
+            {t('Assign')}
+          </Button>
+        </span>
+      }
+    >
+      <p className="mt-0 mb-2 text-[12.5px] text-fg-2">
+        {t('Tags will be added to the {{count}} selected domain(s).', { count })}
+      </p>
+      <Select
+        mode="tags"
+        style={{ width: '100%' }}
+        placeholder={t('Choose or type new tags')}
+        value={value}
+        onChange={onChange}
+        options={allTags.map((tag) => ({ value: tag, label: tag }))}
+      />
+    </DetailPanel>
   )
 }

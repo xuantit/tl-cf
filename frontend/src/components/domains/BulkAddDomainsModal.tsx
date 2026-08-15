@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Modal, Select, Space, Table, Typography } from 'antd'
+import { Alert, Button, Input, Select, Space, Table, Typography } from 'antd'
 import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +9,7 @@ import { useAccountStore } from '../../stores/useAccountStore'
 import type { CfAccount } from '../AccountSwitcher'
 import type { Zone } from '../../types/domain'
 import type { BulkJob } from '../../hooks/useJobPolling'
-import { Tag } from '../ui'
+import { DetailPanel, Tag } from '../ui'
 
 const { Text } = Typography
 
@@ -22,7 +22,7 @@ interface CreatedZoneResult {
   status: string
 }
 
-interface BulkAddDomainsModalProps {
+interface BulkAddDomainsPanelProps {
   open: boolean
   onClose: () => void
   onJobCreated: (jobId: string) => void
@@ -130,8 +130,8 @@ const LINE_TAG: Record<Exclude<LineStatus, 'valid'>, { variant: 'err' | 'warn'; 
 
 const MAX_RENDERED_LINES = 200
 
-/** Bulk zone creation styled after the 2.html bulkadd overlay. */
-export default function BulkAddDomainsModal({ open, onClose, onJobCreated }: BulkAddDomainsModalProps) {
+/** Bulk zone creation styled after the 2.html bulkadd overlay — push-style DetailPanel. */
+export default function BulkAddDomainsPanel({ open, onClose, onJobCreated }: BulkAddDomainsPanelProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [raw, setRaw] = useState('')
@@ -183,37 +183,30 @@ export default function BulkAddDomainsModal({ open, onClose, onJobCreated }: Bul
   }
 
   return (
-    <Modal
-      title={
-        <span>
-          <span className="block text-[14px] font-semibold">{t('Bulk add domains')}</span>
-          <span className="mt-[3px] block font-mono text-[11.5px] font-normal text-fg-3">
-            {t('One domain per line · max 500')}
-          </span>
-        </span>
-      }
+    <DetailPanel
       open={open}
-      onCancel={handleClose}
+      title={t('Bulk add domains')}
+      onClose={handleClose}
       footer={
-        <div className="flex items-center gap-[7px]">
-            <span className="font-mono text-[11.5px] text-fg-3">
+        <div className="flex w-full flex-wrap items-center gap-[7px]">
+          <span className="font-mono text-[11.5px] text-fg-3">
             {t('will create {{count}} zones', { count: validNames.length })}
           </span>
-          <span className="flex-1" />
-          <Button onClick={handleClose}>{t('Cancel')}</Button>
-          <Button
-            type="primary"
-            disabled={validNames.length === 0}
-            loading={createMutation.isPending}
-            onClick={() => createMutation.mutate(validNames)}
-          >
-            {t('Create {{count}} domains', { count: validNames.length })}
-          </Button>
+          <span className="ml-auto flex gap-2">
+            <Button onClick={handleClose}>{t('Cancel')}</Button>
+            <Button
+              type="primary"
+              disabled={validNames.length === 0}
+              loading={createMutation.isPending}
+              onClick={() => createMutation.mutate(validNames)}
+            >
+              {t('Create {{count}} domains', { count: validNames.length })}
+            </Button>
+          </span>
         </div>
       }
-      width={560}
-      destroyOnHidden
     >
+      <p className="mt-0 mb-3 font-mono text-[11.5px] text-fg-3">{t('One domain per line · max 500')}</p>
       <div className="mb-3">
         <label className="mb-1.5 block font-mono text-[11px] tracking-[.08em] text-fg-3 uppercase">
           {t('Cloudflare account')}
@@ -270,6 +263,6 @@ export default function BulkAddDomainsModal({ open, onClose, onJobCreated }: Bul
           )}
         </div>
       )}
-    </Modal>
+    </DetailPanel>
   )
 }

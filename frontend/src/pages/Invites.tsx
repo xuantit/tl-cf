@@ -4,7 +4,6 @@ import {
   Typography,
   Button,
   Space,
-  Modal,
   Form,
   Input,
   InputNumber,
@@ -12,6 +11,7 @@ import {
   Popconfirm,
   Tooltip,
 } from 'antd'
+import type { FormInstance } from 'antd'
 import { message, modal } from '../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
@@ -19,7 +19,7 @@ import type { Dayjs } from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../services/api'
 import PageHeader from '../components/PageHeader'
-import { Banner, EmptyState, Tag } from '../components/ui'
+import { Banner, DetailPanel, EmptyState, Tag } from '../components/ui'
 
 const { Text } = Typography
 
@@ -64,6 +64,12 @@ export default function Invites() {
       },
       { replace: true },
     )
+  }
+
+  // Panel children stay mounted — reset the form here, not in an effect
+  const closeAddPanel = () => {
+    setAddOpen(false)
+    form.resetFields()
   }
 
   const { data: invites = [], isLoading, isError, error, refetch, isFetching } = useQuery<InviteCode[]>({
@@ -227,7 +233,9 @@ export default function Invites() {
   ).length
 
   return (
-    <div className="fade-in p-[clamp(12px,3vw,24px)]">
+    // Panel is a flex sibling of the content so it pushes it left (DetailPanel pattern)
+    <div className="relative flex min-h-full">
+      <div className="fade-in min-w-0 flex-1 p-[clamp(12px,3vw,24px)]">
       <PageHeader
         title={t('Invite codes')}
         crumb={t('{{count}} codes · {{pending}} pending', { count: invites.length, pending: pendingCount })}
@@ -280,38 +288,69 @@ export default function Invites() {
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
         scroll={{ x: 'max-content' }}
       />
+      </div>
 
-      <Modal
-        title={t('Create invite code')}
+      <CreateInvitePanel
         open={addOpen}
-        onCancel={() => setAddOpen(false)}
-        onOk={() => form.submit()}
-        okText={t('Create')}
-        cancelText={t('Cancel')}
-        confirmLoading={createMutation.isPending}
-        destroyOnHidden
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ maxUses: 1 }}
-          onFinish={(values) => createMutation.mutate(values)}
-        >
-          <Form.Item name="note" label={t('Note')} extra={t('e.g. invite for Mr. A, marketing team')}>
-            <Input maxLength={200} placeholder={t('Not required')} />
-          </Form.Item>
-          <Form.Item
-            name="maxUses"
-            label={t('Max uses')}
-            rules={[{ required: true, message: t('Enter max uses') }]}
-          >
-            <InputNumber min={1} max={1000} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="expiresAt" label={t('Expires')} extra={t('Leave empty for no time limit')}>
-            <DatePicker showTime style={{ width: '100%' }} placeholder={t('Pick an expiry time')} />
-          </Form.Item>
-        </Form>
-      </Modal>
+        form={form}
+        saving={createMutation.isPending}
+        onClose={closeAddPanel}
+        onFinish={(values) => createMutation.mutate(values)}
+      />
     </div>
   )
 }
+
+interface CreateInviteValues {
+  note?: string
+  maxUses: number
+  expiresAt?: Dayjs
+}
+
+function CreateInvitePanel({
+  open,
+  form,
+  saving,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  form: FormInstance<CreateInviteValues>
+  saving: boolean
+  onClose: () => void
+  onFinish: (values: CreateInviteValues) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailPanel
+      open={open}
+      title={t('Create invite code')}
+      onClose={onClose}
+      footer={
+        <span className="ml-auto flex gap-2">
+          <Button onClick={onClose}>{t('Cancel')}</Button>
+          <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            {t('Create')}
+          </Button>
+        </span>
+      }
+    >
+      <Form form={form} layout="vertical" initialValues={{ maxUses: 1 }} onFinish={onFinish}>
+        <Form.Item name="note" label={t('Note')} extra={t('e.g. invite for Mr. A, marketing team')}>
+          <Input maxLength={200} placeholder={t('Not required')} />
+        </Form.Item>
+        <Form.Item
+          name="maxUses"
+          label={t('Max uses')}
+          rules={[{ required: true, message: t('Enter max uses') }]}
+        >
+          <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item name="expiresAt" label={t('Expires')} extra={t('Leave empty for no time limit')}>
+          <DatePicker showTime style={{ width: '100%' }} placeholder={t('Pick an expiry time')} />
+        </Form.Item>
+      </Form>
+    </DetailPanel>
+  )
+}
+

@@ -1,11 +1,11 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Form, Input, Modal, Progress, Select, Switch } from 'antd'
+import { Button, Empty, Form, Input, Progress, Select, Switch } from 'antd'
 import { message } from '../../lib/antdApp'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../../services/api'
 import { useJobPolling, type BulkJobItem } from '../../hooks/useJobPolling'
-import { Lbl, Tag } from '../ui'
+import { DetailPanel, Lbl, Tag } from '../ui'
 
 interface PreviewRecord {
   zoneId: string
@@ -18,7 +18,7 @@ interface PreviewRecord {
   priority?: number
 }
 
-interface BulkDnsReplaceModalProps {
+interface BulkDnsReplacePanelProps {
   open: boolean
   onClose: () => void
   zoneIds: string[]
@@ -74,10 +74,11 @@ const JOB_ITEM_TAG: Record<BulkJobItem['status'], { variant: 'default' | 'ok' | 
 }
 
 /**
- * Bulk DNS find/replace as a 4-step wizard (2.html wizard section).
- * Step 0 (zone selection) happens in the table beforehand and renders as done.
+ * Bulk DNS find/replace as a 4-step wizard (2.html wizard section) in a
+ * push-style DetailPanel. Step 0 (zone selection) happens in the table
+ * beforehand and renders as done.
  */
-export default function BulkDnsReplaceModal({ open, onClose, zoneIds, zoneNames }: BulkDnsReplaceModalProps) {
+export default function BulkDnsReplacePanel({ open, onClose, zoneIds, zoneNames }: BulkDnsReplacePanelProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [form] = Form.useForm<ConditionValues>()
@@ -165,15 +166,7 @@ export default function BulkDnsReplaceModal({ open, onClose, zoneIds, zoneNames 
   ).size
 
   return (
-    <Modal
-      title={t('Bulk DNS replace')}
-      open={open}
-      onCancel={handleClose}
-      footer={null}
-      width={640}
-      maskClosable={step !== 3}
-      destroyOnHidden
-    >
+    <DetailPanel open={open} title={t('Bulk DNS replace')} onClose={handleClose}>
       <StepsHeader current={step} />
       <p className="mb-[14px] font-mono text-[10.5px] text-fg-3">
         {t('Applies to {{count}} selected domains.', { count: zoneIds.length })}
@@ -191,7 +184,7 @@ export default function BulkDnsReplaceModal({ open, onClose, zoneIds, zoneNames 
               <Empty description={t('No domains selected — close this dialog and tick domains in the table first.')} />
             </Form.Item>
           )}
-          <div className="grid gap-x-3 sm:grid-cols-2">
+          <div className="grid gap-x-3">
             <Form.Item label={t('Record type')} name="recordType">
               <Select
                 allowClear
@@ -340,6 +333,6 @@ export default function BulkDnsReplaceModal({ open, onClose, zoneIds, zoneNames 
           </div>
         </div>
       )}
-    </Modal>
+    </DetailPanel>
   )
 }

@@ -421,6 +421,7 @@
   "Skip": "Bỏ qua",
   "Overwrite": "Ghi đè",
   "Create": "Tạo",
+  "No matching domains": "Không có domain phù hợp",
   "Results of bulk operations (purge, delete, create domains, DNS replace, apply template)": "Kết quả các thao tác hàng loạt (purge, xoá, tạo domain, đổi DNS, apply template)",
   "Refresh": "Làm mới",
   "Bulk purge cache job": "Purge cache hàng loạt",
