@@ -6,6 +6,7 @@ import { sendApiError } from "../utils/apiError.js";
 import logger from "../utils/logger.js";
 import { getCredentials } from "./cf.js";
 import { cloudflareService, type TunnelIngressRule } from "../services/cloudflare.js";
+import { recordChangeSafe } from "../services/changes.js";
 
 export const tunnelsRouter = Router();
 
@@ -70,6 +71,12 @@ tunnelsRouter.post("/", async (req, res) => {
     const body = createTunnelSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const tunnel = await cloudflareService.createTunnel(credentials, body.name);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "tunnel.create",
+      items: [{ resourceType: "tunnel", resourceId: tunnel.id, after: { name: tunnel.name } }],
+    });
     return res.status(201).json(tunnel);
   } catch (error) {
     return sendApiError(res, error, {
@@ -88,6 +95,12 @@ tunnelsRouter.delete("/:tunnelId", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deleteTunnel(credentials, tunnelId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "tunnel.delete",
+      items: [{ resourceType: "tunnel", resourceId: tunnelId }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -131,6 +144,18 @@ tunnelsRouter.put("/:tunnelId/configurations", async (req, res) => {
     const ingress: TunnelIngressRule[] = [...hostnameRules, catchAll];
     const credentials = await getCredentials(auth.userId, accountId, label);
     const config = await cloudflareService.putTunnelConfiguration(credentials, tunnelId, ingress);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "tunnel.config.update",
+      items: [
+        {
+          resourceType: "tunnel",
+          resourceId: tunnelId,
+          after: { hostnames: hostnameRules.map((rule) => rule.hostname).filter((h): h is string => !!h) },
+        },
+      ],
+    });
     return res.json(config);
   } catch (error) {
     return sendApiError(res, error, {
@@ -167,6 +192,12 @@ tunnelsRouter.delete("/:tunnelId/connections", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deleteTunnelConnections(credentials, tunnelId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "tunnel.connections.drop",
+      items: [{ resourceType: "tunnel", resourceId: tunnelId }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {

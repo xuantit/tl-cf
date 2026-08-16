@@ -13,7 +13,7 @@ import {
 } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
 import { db } from "../src/services/db.js";
-import { cloudflareAccounts, users } from "../src/db/schema.js";
+import { changeSets, cloudflareAccounts, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const run = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,6 +73,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(changeSets).where(eq(changeSets.ownerId, userId));
   await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
   await db.delete(users).where(eq(users.id, userId));
 });
@@ -189,6 +190,29 @@ describe("POST /api/pages/projects/:projectName/deployments/:deploymentId/rollba
     expect(res.status).toBe(200);
     expect(res.body).toEqual(sampleDeployment);
     expect(spy).toHaveBeenCalledWith(expect.anything(), "my-site", "deploy-1");
+  });
+
+  it("records a change set when a deployment is rolled back", async () => {
+    vi.spyOn(cloudflareService, "rollbackPagesDeployment").mockResolvedValue(sampleDeployment);
+
+    const res = await request(app)
+      .post(`/api/pages/projects/my-site/deployments/deploy-history/rollback?accountId=${accountId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+
+    const history = await request(app)
+      .get("/api/changes?action=pages.deployment.rollback")
+      .set("Authorization", `Bearer ${token}`);
+    expect(history.status).toBe(200);
+    const entry = history.body.find(
+      (c: { items: { resourceId: string }[] }) => c.items[0]?.resourceId === "deploy-history",
+    );
+    expect(entry).toBeTruthy();
+    expect(entry.items[0]).toMatchObject({
+      resourceType: "pages_deployment",
+      resourceId: "deploy-history",
+      after: { project: "my-site" },
+    });
   });
 });
 

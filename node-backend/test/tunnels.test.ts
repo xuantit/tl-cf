@@ -13,7 +13,7 @@ import {
 } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
 import { db } from "../src/services/db.js";
-import { cloudflareAccounts, users } from "../src/db/schema.js";
+import { changeSets, cloudflareAccounts, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const run = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -61,6 +61,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(changeSets).where(eq(changeSets.ownerId, userId));
   await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
   await db.delete(users).where(eq(users.id, userId));
 });
@@ -217,5 +218,27 @@ describe("POST /api/tunnels/:tunnelId/token/reveal", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ token: "eyJhIjoidHVubmVsIn0" });
     expect(spy).toHaveBeenCalledWith(expect.anything(), tunnelId);
+  });
+});
+
+describe("change history", () => {
+  it("records a change set when a tunnel is deleted", async () => {
+    vi.spyOn(cloudflareService, "deleteTunnel").mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .delete(`/api/tunnels/${tunnelId}?accountId=${accountId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(204);
+
+    const history = await request(app)
+      .get("/api/changes?action=tunnel.delete")
+      .set("Authorization", `Bearer ${token}`);
+    expect(history.status).toBe(200);
+    const entry = history.body.find(
+      (c: { action: string; items: { resourceId: string }[] }) => c.items[0]?.resourceId === tunnelId,
+    );
+    expect(entry).toBeTruthy();
+    expect(entry.status).toBe("done");
+    expect(entry.items[0]).toMatchObject({ resourceType: "tunnel", resourceId: tunnelId });
   });
 });

@@ -5,6 +5,7 @@ import { requireAuth, type AuthUser } from "../middleware/auth.js";
 import { sendApiError } from "../utils/apiError.js";
 import { getCredentials } from "./cf.js";
 import { cloudflareService } from "../services/cloudflare.js";
+import { recordChangeSafe } from "../services/changes.js";
 
 export const pagesRouter = Router();
 
@@ -79,6 +80,12 @@ pagesRouter.post("/projects/:projectName/deployments/:deploymentId/rollback", as
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const deployment = await cloudflareService.rollbackPagesDeployment(credentials, projectName, deploymentId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.deployment.rollback",
+      items: [{ resourceType: "pages_deployment", resourceId: deploymentId, after: { project: projectName } }],
+    });
     return res.json(deployment);
   } catch (error) {
     return sendApiError(res, error, {
@@ -161,6 +168,19 @@ pagesRouter.patch("/projects/:projectName/env", async (req, res) => {
     }));
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.patchPagesEnvVars(credentials, projectName, envVars, body.removedKeys);
+    // Chỉ ghi TÊN biến vào history — không bao giờ ghi value/secretValue.
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.env.update",
+      items: [
+        {
+          resourceType: "pages_project",
+          resourceId: projectName,
+          after: { keys: envVars.map((v) => v.key), removedKeys: body.removedKeys },
+        },
+      ],
+    });
     return res.json({ ok: true });
   } catch (error) {
     return sendApiError(res, error, {
@@ -179,6 +199,12 @@ pagesRouter.post("/projects/:projectName/deployments/:deploymentId/retry", async
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const deployment = await cloudflareService.retryPagesDeployment(credentials, projectName, deploymentId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.deployment.retry",
+      items: [{ resourceType: "pages_deployment", resourceId: deploymentId, after: { project: projectName } }],
+    });
     return res.json(deployment);
   } catch (error) {
     return sendApiError(res, error, {
@@ -209,6 +235,12 @@ pagesRouter.delete("/projects/:projectName/deployments", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     const result = await cloudflareService.deleteAllPagesDeployments(credentials, projectName);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.deployments.delete_all",
+      items: [{ resourceType: "pages_project", resourceId: projectName, after: result }],
+    });
     return res.json(result);
   } catch (error) {
     return sendApiError(res, error, {
@@ -229,6 +261,12 @@ pagesRouter.delete("/projects/:projectName", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deletePagesProject(credentials, projectName);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.project.delete",
+      items: [{ resourceType: "pages_project", resourceId: projectName }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -247,6 +285,12 @@ pagesRouter.delete("/projects/:projectName/deployments/:deploymentId", async (re
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deletePagesDeployment(credentials, projectName, deploymentId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.deployment.delete",
+      items: [{ resourceType: "pages_deployment", resourceId: deploymentId, after: { project: projectName } }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -270,6 +314,12 @@ pagesRouter.post("/projects/:projectName/domains", async (req, res) => {
     const body = addDomainSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const domain = await cloudflareService.addPagesDomain(credentials, projectName, body.name);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.domain.add",
+      items: [{ resourceType: "pages_domain", resourceId: body.name, after: { project: projectName } }],
+    });
     return res.status(201).json(domain);
   } catch (error) {
     return sendApiError(res, error, {
@@ -288,6 +338,12 @@ pagesRouter.delete("/projects/:projectName/domains/:domain", async (req, res) =>
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deletePagesDomain(credentials, projectName, domain);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "pages.domain.delete",
+      items: [{ resourceType: "pages_domain", resourceId: domain, after: { project: projectName } }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {

@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "./db.js";
 import { changeItems, changeSets, type ChangeItemRow, type ChangeSetRow } from "../db/schema.js";
+import logger from "../utils/logger.js";
 
 export type ChangeItemPayload = {
   resourceType: string;
@@ -98,6 +99,17 @@ export async function createChangeSet(payload: CreateChangeSetPayload) {
     }
     return mapChangeSet({ ...created, items });
   });
+}
+
+/** Persist a change history entry; never let history failures break the primary operation. */
+export async function recordChangeSafe(
+  payload: CreateChangeSetPayload & { items: ChangeItemPayload[] },
+): Promise<void> {
+  try {
+    await createChangeSet({ status: "done", finishedAt: new Date(), reversible: false, ...payload });
+  } catch (error) {
+    logger.warn("Failed to record change set", { action: payload.action, error: (error as Error).message });
+  }
 }
 
 export async function listChangeSets(ownerId: string, params: { limit?: number; accountId?: string; zoneId?: string; action?: string }) {

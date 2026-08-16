@@ -6,6 +6,7 @@ import { sendApiError } from "../utils/apiError.js";
 import logger from "../utils/logger.js";
 import { getCredentials } from "./cf.js";
 import { cloudflareService } from "../services/cloudflare.js";
+import { recordChangeSafe } from "../services/changes.js";
 
 export const workersRouter = Router();
 
@@ -66,6 +67,12 @@ workersRouter.delete("/scripts/:scriptName", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deleteWorkerScript(credentials, scriptName);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "worker.delete",
+      items: [{ resourceType: "worker_script", resourceId: scriptName }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -105,6 +112,19 @@ workersRouter.post("/zones/:zoneId/routes", async (req, res) => {
     const body = createRouteSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const route = await cloudflareService.createWorkerRoute(credentials, zoneId, body.pattern, body.script);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      zoneId,
+      action: "worker.route.create",
+      items: [
+        {
+          resourceType: "worker_route",
+          resourceId: route.id || body.pattern,
+          after: { pattern: body.pattern, script: body.script },
+        },
+      ],
+    });
     return res.status(201).json(route);
   } catch (error) {
     return sendApiError(res, error, {
@@ -125,6 +145,13 @@ workersRouter.delete("/zones/:zoneId/routes/:routeId", async (req, res) => {
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deleteWorkerRoute(credentials, zoneId, routeId);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      zoneId,
+      action: "worker.route.delete",
+      items: [{ resourceType: "worker_route", resourceId: routeId }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -198,6 +225,12 @@ workersRouter.put("/scripts/:scriptName/schedules", async (req, res) => {
     const body = putSchedulesSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const schedules = await cloudflareService.putWorkerSchedules(credentials, scriptName, body.schedules);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "worker.schedules.update",
+      items: [{ resourceType: "worker_script", resourceId: scriptName, after: { crons: body.schedules } }],
+    });
     return res.json({ schedules });
   } catch (error) {
     return sendApiError(res, error, {
@@ -239,6 +272,12 @@ workersRouter.post("/scripts/:scriptName/subdomain", async (req, res) => {
     const body = subdomainSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     const setting = await cloudflareService.setWorkerSubdomainSetting(credentials, scriptName, body.enabled);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "worker.subdomain.update",
+      items: [{ resourceType: "worker_script", resourceId: scriptName, after: { enabled: setting.enabled } }],
+    });
     return res.json({ enabled: setting.enabled });
   } catch (error) {
     return sendApiError(res, error, {
@@ -285,6 +324,13 @@ workersRouter.put("/scripts/:scriptName/secrets", async (req, res) => {
     const body = putSecretSchema.parse(req.body);
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.putWorkerSecret(credentials, scriptName, body.name, body.secretValue);
+    // Chỉ ghi TÊN secret vào history — không bao giờ ghi giá trị.
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "worker.secret.set",
+      items: [{ resourceType: "worker_secret", resourceId: body.name }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {
@@ -305,6 +351,12 @@ workersRouter.delete("/scripts/:scriptName/secrets/:secretName", async (req, res
   try {
     const credentials = await getCredentials(auth.userId, accountId, label);
     await cloudflareService.deleteWorkerSecret(credentials, scriptName, secretName);
+    await recordChangeSafe({
+      ownerId: auth.userId,
+      accountId: accountId ?? undefined,
+      action: "worker.secret.delete",
+      items: [{ resourceType: "worker_secret", resourceId: secretName }],
+    });
     return res.status(204).send();
   } catch (error) {
     return sendApiError(res, error, {

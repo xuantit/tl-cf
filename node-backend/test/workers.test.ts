@@ -12,7 +12,7 @@ import {
 } from "../src/services/cloudflare.js";
 import { configService } from "../src/services/configService.js";
 import { db } from "../src/services/db.js";
-import { auditLogs, cloudflareAccounts, users } from "../src/db/schema.js";
+import { auditLogs, changeSets, cloudflareAccounts, users } from "../src/db/schema.js";
 import { encrypt } from "../src/utils/encryption.js";
 
 const run = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -54,6 +54,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(changeSets).where(eq(changeSets.ownerId, userId));
   await db.delete(auditLogs).where(eq(auditLogs.userId, userId));
   await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
   await db.delete(users).where(eq(users.id, userId));
@@ -131,6 +132,25 @@ describe("DELETE /api/workers/scripts/:scriptName", () => {
 
     expect(res.status).toBe(204);
     expect(spy).toHaveBeenCalledWith(expect.anything(), "my-worker");
+  });
+
+  it("records a change set when a script is deleted", async () => {
+    vi.spyOn(cloudflareService, "deleteWorkerScript").mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .delete(`/api/workers/scripts/history-worker?accountId=${accountId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(204);
+
+    const history = await request(app)
+      .get("/api/changes?action=worker.delete")
+      .set("Authorization", `Bearer ${token}`);
+    expect(history.status).toBe(200);
+    const entry = history.body.find(
+      (c: { items: { resourceId: string }[] }) => c.items[0]?.resourceId === "history-worker",
+    );
+    expect(entry).toBeTruthy();
+    expect(entry.items[0]).toMatchObject({ resourceType: "worker_script", resourceId: "history-worker" });
   });
 });
 
