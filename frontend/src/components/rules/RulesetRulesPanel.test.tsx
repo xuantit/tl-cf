@@ -83,4 +83,35 @@ describe('RulesetRulesPanel', () => {
     expect(screen.getByText('Expression Preview')).toBeInTheDocument()
     expect(screen.getByLabelText('Cache eligibility')).toBeInTheDocument()
   })
+
+  it('loads WAF custom rules for kind security and shows the action label', async () => {
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === '/rules/z1/security') {
+        return Promise.resolve({
+          data: {
+            rules: [
+              {
+                id: 's1',
+                enabled: true,
+                description: 'Block xmlrpc',
+                expression: '(http.request.uri.path eq "/xmlrpc.php")',
+                action: 'block',
+                position: 1,
+              },
+            ],
+            quota: { used: 1 },
+            warnings: [],
+          },
+        })
+      }
+      return Promise.resolve({ data: { rules: [], quota: { used: 0 }, warnings: [] } })
+    })
+
+    renderPanel('z1', 'security', ['/domains/z1?tab=security'])
+
+    expect(await screen.findByText('Custom rules (WAF)')).toBeInTheDocument()
+    expect(await screen.findByText('Block xmlrpc')).toBeInTheDocument()
+    expect(screen.getByText('Block')).toBeInTheDocument()
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/rules/z1/security'))
+  })
 })

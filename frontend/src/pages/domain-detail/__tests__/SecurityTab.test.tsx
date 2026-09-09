@@ -8,7 +8,7 @@ vi.mock('../../../services/api', () => ({
 }))
 
 import SecurityTab from '../SecurityTab'
-import { apiPatch, apiPost, mockDetailApi, renderWithProviders } from './testUtils'
+import { apiGet, apiPatch, apiPost, mockDetailApi, renderWithProviders } from './testUtils'
 
 describe('SecurityTab', () => {
   beforeEach(() => {
@@ -35,6 +35,13 @@ describe('SecurityTab', () => {
     await waitFor(() =>
       expect(apiPatch).toHaveBeenCalledWith('/domains/z1/security', { always_use_https: 'on' }),
     )
+  })
+
+  it('renders the WAF custom rules section and fetches /rules/:zoneId/security', async () => {
+    renderWithProviders(<SecurityTab zoneId="z1" zoneName="tienlen.vn" />)
+
+    expect(await screen.findByText('Custom rules (WAF)')).toBeInTheDocument()
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/rules/z1/security'))
   })
 
   it('renders IP access rules and posts a new rule', async () => {

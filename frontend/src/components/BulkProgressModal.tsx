@@ -18,6 +18,8 @@ const TYPE_TITLES: Record<string, string> = {
   'create-zones': 'Creating domains in bulk',
   'dns-replace': 'Replacing DNS in bulk',
   'apply-template': 'Applying template',
+  'copy-config': 'Copying config in bulk',
+  'clone-domain': 'Cloning domain',
 }
 
 /** "còn ~14s" estimate from throughput so far; null while it cannot be computed. */

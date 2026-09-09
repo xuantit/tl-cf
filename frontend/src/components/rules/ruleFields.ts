@@ -12,11 +12,11 @@
  * (vd `vary`, `cache_key.custom_key`, `edge_ttl.status_code_ttl`).
  */
 
-export type RuleKind = 'redirect' | 'cache' | 'configuration'
+export type RuleKind = 'redirect' | 'cache' | 'configuration' | 'security'
 
-export const RULE_KINDS: RuleKind[] = ['redirect', 'cache', 'configuration']
+export const RULE_KINDS: RuleKind[] = ['redirect', 'cache', 'configuration', 'security']
 
-export type FieldType = 'bool3' | 'select' | 'number' | 'text'
+export type FieldType = 'bool3' | 'select' | 'number' | 'text' | 'textarea'
 
 export interface FieldDef {
   name: string
@@ -248,9 +248,68 @@ export const REDIRECT_FIELDS: FieldDef[] = [
   { name: 'preserve_query_string', label: 'Preserve query string', type: 'bool3' },
 ]
 
+/**
+ * WAF Custom Rules (phase http_request_firewall_custom).
+ * Docs: https://developers.cloudflare.com/waf/custom-rules/
+ * Action là thuộc tính cấp rule (không phải action_parameters) — form dùng key
+ * `security_action`, panel gửi lên API dưới dạng `action`.
+ */
+export const SECURITY_ACTION_OPTIONS = [
+  { value: 'managed_challenge', label: 'Managed Challenge (recommended)' },
+  { value: 'block', label: 'Block' },
+  { value: 'js_challenge', label: 'JS Challenge' },
+  { value: 'challenge', label: 'Interactive Challenge' },
+  { value: 'log', label: 'Log (Enterprise)' },
+  { value: 'skip', label: 'Skip (advanced)' },
+]
+
+export function securityActionLabel(action: string): string {
+  return SECURITY_ACTION_OPTIONS.find((o) => o.value === action)?.label ?? action
+}
+
+export const SECURITY_FIELDS: FieldDef[] = [
+  {
+    name: 'security_action',
+    label: 'Action',
+    type: 'select',
+    required: true,
+    options: SECURITY_ACTION_OPTIONS,
+    help: 'Skip: điền action_parameters (ruleset/phases/products…) trong ô JSON nâng cao',
+  },
+  {
+    name: 'response_status_code',
+    label: 'Custom response status code',
+    type: 'number',
+    showIf: (v) => v.security_action === 'block',
+    help: 'response.status_code (400–499)',
+  },
+  {
+    name: 'response_content_type',
+    label: 'Custom response content type',
+    type: 'select',
+    showIf: (v) => v.security_action === 'block',
+    options: [
+      { value: '', label: 'Not set' },
+      { value: 'text/plain', label: 'text/plain' },
+      { value: 'text/html', label: 'text/html' },
+      { value: 'application/json', label: 'application/json' },
+      { value: 'text/xml', label: 'text/xml' },
+    ],
+    help: 'response.content_type',
+  },
+  {
+    name: 'response_content',
+    label: 'Custom response body',
+    type: 'textarea',
+    showIf: (v) => v.security_action === 'block',
+    help: 'response.content',
+  },
+]
+
 export function fieldsForKind(kind: RuleKind): FieldDef[] {
   if (kind === 'cache') return CACHE_FIELDS
   if (kind === 'configuration') return CONFIGURATION_FIELDS
+  if (kind === 'security') return SECURITY_FIELDS
   return REDIRECT_FIELDS
 }
 
@@ -271,6 +330,7 @@ const HANDLED_TOP_KEYS: Record<RuleKind, string[]> = {
   ],
   configuration: CONFIGURATION_FIELDS.map((f) => f.name),
   redirect: ['from_value'],
+  security: ['response'],
 }
 
 /** Key con của các object lồng nhau mà form xử lý (giữ lại phần còn lại). */
@@ -281,6 +341,7 @@ const HANDLED_NESTED_KEYS: Record<string, string[]> = {
   cache_reserve: ['eligible', 'minimum_file_size'],
   serve_stale: ['disable_stale_while_updating'],
   from_value: ['target_url', 'status_code', 'preserve_query_string'],
+  response: ['status_code', 'content', 'content_type'],
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -374,6 +435,17 @@ export function paramsToFields(kind: RuleKind, params?: Record<string, unknown>)
     return { values, advanced }
   }
 
+  if (kind === 'security') {
+    const response = asRecord(source.response)
+    values.response_status_code =
+      typeof response.status_code === 'number' ? response.status_code : undefined
+    values.response_content = typeof response.content === 'string' ? response.content : ''
+    values.response_content_type =
+      typeof response.content_type === 'string' ? response.content_type : ''
+    keepNested('response')
+    return { values, advanced }
+  }
+
   const fromValue = asRecord(source.from_value)
   const targetUrl = asRecord(fromValue.target_url)
   const isDynamic = typeof targetUrl.expression === 'string'
@@ -435,6 +507,13 @@ export function summarizeActionParameters(
         return `${field.label}: ${optionLabel(field.name, value) ?? String(value)}`
       })
       .sort((a, b) => a.localeCompare(b))
+  }
+
+  if (kind === 'security') {
+    const labels: string[] = []
+    const response = asRecord(source.response)
+    if (Object.keys(response).length > 0) labels.push('Custom response')
+    return labels
   }
 
   const fromValue = asRecord(source.from_value)
@@ -554,6 +633,31 @@ export function fieldsToParams(
         else delete params[field.name]
       }
     }
+    return pruneEmpty(params)
+  }
+
+  if (kind === 'security') {
+    // Chỉ action block mới có custom response; các action khác không có params
+    // khai báo — action_parameters của skip đi qua ô JSON nâng cao nguyên vẹn.
+    const response: Record<string, unknown> = { ...asRecord(advanced.response) }
+    if (values.security_action === 'block') {
+      if (
+        values.response_status_code !== undefined &&
+        values.response_status_code !== null &&
+        values.response_status_code !== ''
+      ) {
+        response.status_code = Number(values.response_status_code)
+      }
+      if (typeof values.response_content === 'string' && values.response_content !== '') {
+        response.content = values.response_content
+      }
+      if (typeof values.response_content_type === 'string' && values.response_content_type !== '') {
+        response.content_type = values.response_content_type
+      }
+    }
+    const resp = values.security_action === 'block' ? pruneEmpty(response) : undefined
+    if (resp) params.response = resp
+    else delete params.response
     return pruneEmpty(params)
   }
 

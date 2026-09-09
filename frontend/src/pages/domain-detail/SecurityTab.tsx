@@ -6,6 +6,7 @@ import { message } from '../../lib/antdApp'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { Banner, DetailPanel, EmptyState, KvRow, Lbl, SectionHeader, SkeletonLine, Tag } from '../../components/ui'
+import RulesetRulesPanel from '../../components/rules/RulesetRulesPanel'
 import { api, apiErrorDetail } from '../../services/api'
 import type { SecuritySettings, SslSettings } from '../../types/domain'
 
@@ -406,7 +407,7 @@ function AccessRulesSection({ zoneId }: { zoneId: string }) {
  * immediately per control, matching the previous DomainDetail behaviour
  * (no local dirty-state; only the settings the backend supports are shown).
  */
-export default function SecurityTab({ zoneId }: { zoneId: string }) {
+export default function SecurityTab({ zoneId, zoneName }: { zoneId: string; zoneName?: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
 
@@ -563,6 +564,9 @@ export default function SecurityTab({ zoneId }: { zoneId: string }) {
           </p>
         </div>
       </div>
+
+      {/* WAF Custom Rules sống cùng chỗ với các thiết lập bảo mật khác của zone. */}
+      <RulesetRulesPanel zoneId={zoneId} kind="security" zoneName={zoneName} />
 
       <AccessRulesSection zoneId={zoneId} />
     </div>

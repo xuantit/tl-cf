@@ -6,7 +6,13 @@ import { cloudflareService, type CloudflareCredentials, type DnsRecord } from ".
 import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import { configService } from "../services/configService.js";
-import { createChangeSet, type ChangeItemPayload } from "../services/changes.js";
+import { createChangeSet, recordChangeSafe, type ChangeItemPayload } from "../services/changes.js";
+import {
+  applyZoneConfig,
+  collectZoneConfig,
+  summarizeApplySteps,
+  type ZoneConfigComponent,
+} from "../services/zoneConfig.js";
 import { db } from "../services/db.js";
 import { tagRules as tagRulesTable } from "../db/schema.js";
 import { and, eq } from "drizzle-orm";
@@ -481,6 +487,195 @@ domainsRouter.post("/bulk-dns/replace", async (req, res) => {
       status: 400,
       code: "BULK_DNS_REPLACE_FAILED",
       detail: "Bulk DNS replace failed",
+    });
+  }
+});
+
+// ---- Copy config / clone domain (static paths — must stay before "/:zoneId" routes) ----
+
+const zoneConfigComponentSchema = z.enum(["dns", "settings", "rules", "securityRules", "pageRules"]);
+const dnsModeSchema = z.enum(["skip", "overwrite"]).default("skip");
+
+// Copy a config snapshot from one zone onto one or more target zones (background bulk job)
+domainsRouter.post("/copy-config", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  const bodySchema = z.object({
+    sourceZoneId: z.string().min(1),
+    sourceZoneName: z.string().min(1),
+    targets: z
+      .array(z.object({ zoneId: z.string().min(1), zoneName: z.string().min(1) }))
+      .min(1)
+      .max(100),
+    components: z.array(zoneConfigComponentSchema).min(1),
+    dnsMode: dnsModeSchema,
+  });
+  try {
+    const body = bodySchema.parse(req.body);
+    const components = [...new Set(body.components)] as ZoneConfigComponent[];
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
+
+    // Snapshot the source zone once; every target applies the same snapshot.
+    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, components);
+
+    const job = createJob(
+      "copy-config",
+      auth.userId,
+      body.targets.map((target) => ({ key: target.zoneId, label: target.zoneName })),
+      async (item) => {
+        const target = body.targets.find((t) => t.zoneId === item.key)!;
+        const steps = await applyZoneConfig(credentials, target, snapshot, body.sourceZoneName, {
+          dnsMode: body.dnsMode,
+          components,
+        });
+        await recordChangeSafe({
+          ownerId: auth.userId,
+          accountId: resolvedAccountId ?? undefined,
+          zoneId: target.zoneId,
+          action: "config.copy",
+          items: [
+            {
+              resourceType: "zone_config",
+              resourceId: target.zoneId,
+              after: { source: body.sourceZoneName, components, steps: summarizeApplySteps(steps) },
+            },
+          ],
+        });
+        return { zoneId: target.zoneId, steps };
+      },
+    );
+
+    res.status(202).json({ jobId: job.id });
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "COPY_CONFIG_FAILED",
+      detail: "Copy config failed",
+    });
+  }
+});
+
+// Clone a domain: create new zones and apply the source zone's config snapshot to each
+domainsRouter.post("/clone", async (req, res) => {
+  const auth = req.auth as AuthUser;
+  const accountId = req.query.accountId as string | undefined;
+  const label = req.query.label as string | undefined;
+  const bodySchema = z.object({
+    sourceZoneId: z.string().min(1),
+    sourceZoneName: z.string().min(1),
+    newDomains: z.array(z.string()).min(1).max(50),
+    components: z.array(zoneConfigComponentSchema).min(1),
+    dnsMode: dnsModeSchema,
+  });
+  try {
+    const body = bodySchema.parse(req.body);
+    const components = [...new Set(body.components)] as ZoneConfigComponent[];
+
+    // Normalize: trim, lowercase, dedupe, validate (same rules as bulk-create)
+    const names = [...new Set(body.newDomains.map((n) => n.trim().toLowerCase()).filter(Boolean))];
+    const invalid = names.filter((n) => !DOMAIN_NAME_REGEX.test(n));
+    if (invalid.length > 0) {
+      return sendApiError(res, new Error(`Tên domain không hợp lệ: ${invalid.join(", ")}`), {
+        status: 400,
+        code: "DOMAIN_VALIDATION_FAILED",
+        detail: "Domain validation failed",
+      });
+    }
+    if (names.length === 0) {
+      return sendApiError(res, new Error("Danh sách domain trống"), {
+        status: 400,
+        code: "DOMAIN_LIST_EMPTY",
+        detail: "Domain list is empty",
+      });
+    }
+
+    const credentials = await getCredentials(auth.userId, accountId, label);
+    const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
+
+    // Snapshot the source zone once before starting the job.
+    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, components);
+
+    // Resolve the Cloudflare account id once to avoid repeated listAccounts calls
+    const cfAccounts = await cloudflareService.listAccounts(credentials);
+    if (cfAccounts.length === 0) {
+      return sendApiError(res, new Error("Không tìm thấy Cloudflare account để tạo zone"), {
+        status: 400,
+        code: "CLOUDFLARE_ACCOUNT_NOT_FOUND",
+        detail: "No Cloudflare account available for zone creation",
+      });
+    }
+    const cfAccountId = cfAccounts[0].id;
+
+    // Read local tags of the source domain once (best-effort) so clones inherit them.
+    let sourceTags: string[] | undefined;
+    if (resolvedAccountId) {
+      try {
+        const sourceDomain = await configService.getDomainByZoneId(resolvedAccountId, body.sourceZoneId);
+        sourceTags = sourceDomain?.settings?.tags;
+      } catch (error: any) {
+        logger.warn("Failed to read source domain tags for clone", { error: error.message });
+      }
+    }
+
+    const job = createJob(
+      "clone-domain",
+      auth.userId,
+      names.map((name) => ({ key: name, label: name })),
+      async (item) => {
+        const zone = await cloudflareService.createZone(credentials, item.key, cfAccountId, false);
+        const steps = await applyZoneConfig(
+          credentials,
+          { zoneId: zone.id, zoneName: zone.name },
+          snapshot,
+          body.sourceZoneName,
+          { dnsMode: body.dnsMode, components },
+        );
+
+        // Sync new zone into local config and copy the source domain's tags (best-effort)
+        if (resolvedAccountId) {
+          try {
+            const existing = await configService.getDomainByZoneId(resolvedAccountId, zone.id);
+            if (!existing) {
+              await configService.addDomain(resolvedAccountId, {
+                name: zone.name,
+                zoneId: zone.id,
+                status: zone.status,
+                settings: sourceTags?.length ? { tags: sourceTags } : undefined,
+              });
+            } else if (sourceTags?.length) {
+              await configService.updateDomainSettings(resolvedAccountId, existing.id, { tags: sourceTags });
+            }
+          } catch (error: any) {
+            logger.warn("Failed to sync cloned zone to config", { zoneId: zone.id, error: error.message });
+          }
+        }
+
+        await recordChangeSafe({
+          ownerId: auth.userId,
+          accountId: resolvedAccountId ?? undefined,
+          zoneId: zone.id,
+          action: "domain.clone",
+          items: [
+            {
+              resourceType: "zone_config",
+              resourceId: zone.id,
+              after: { source: body.sourceZoneName, components, steps: summarizeApplySteps(steps) },
+            },
+          ],
+        });
+
+        return { zoneId: zone.id, nameservers: zone.nameServers || [], steps };
+      },
+    );
+
+    res.status(202).json({ jobId: job.id });
+  } catch (error: any) {
+    sendApiError(res, error, {
+      status: 400,
+      code: "DOMAIN_CLONE_FAILED",
+      detail: "Domain clone failed",
     });
   }
 });

@@ -144,3 +144,43 @@ describe('redirect rules action parameters', () => {
     expect(values.status_code).toBe('301')
   })
 })
+
+describe('security rules (WAF custom rules) action parameters', () => {
+  it('builds a block custom response', () => {
+    expect(
+      fieldsToParams('security', {
+        security_action: 'block',
+        response_status_code: 403,
+        response_content: 'Forbidden',
+        response_content_type: 'text/plain',
+      }),
+    ).toEqual({
+      response: { status_code: 403, content: 'Forbidden', content_type: 'text/plain' },
+    })
+  })
+
+  it('sends no action parameters for challenge actions', () => {
+    expect(fieldsToParams('security', { security_action: 'managed_challenge' })).toBeUndefined()
+    expect(fieldsToParams('security', { security_action: 'js_challenge' })).toBeUndefined()
+  })
+
+  it('keeps skip action parameters in the advanced bucket', () => {
+    const params = fieldsToParams(
+      'security',
+      { security_action: 'skip' },
+      { ruleset: 'current', phases: ['http_ratelimit'] },
+    )
+    expect(params).toEqual({ ruleset: 'current', phases: ['http_ratelimit'] })
+  })
+
+  it('reads an existing block rule back into the form', () => {
+    const { values, advanced } = paramsToFields('security', {
+      response: { status_code: 429, content: 'slow down', content_type: 'text/plain' },
+      products: ['waf'],
+    })
+    expect(values.response_status_code).toBe(429)
+    expect(values.response_content).toBe('slow down')
+    expect(values.response_content_type).toBe('text/plain')
+    expect(advanced).toEqual({ products: ['waf'] })
+  })
+})

@@ -209,7 +209,7 @@ export function clearAccountIdCache(): void {
   accountIdCache.clear();
 }
 
-export type RuleKind = "redirect" | "cache" | "configuration";
+export type RuleKind = "redirect" | "cache" | "configuration" | "security";
 
 export interface RulesetRule {
   id: string;
@@ -232,12 +232,14 @@ const RULE_KIND_PHASE: Record<RuleKind, string> = {
   redirect: "http_request_dynamic_redirect",
   cache: "http_request_cache_settings",
   configuration: "http_config_settings",
+  security: "http_request_firewall_custom",
 };
 
 const RULE_KIND_DEFAULT_ACTION: Record<RuleKind, string> = {
   redirect: "redirect",
   cache: "set_cache_settings",
   configuration: "set_config",
+  security: "block",
 };
 
 export function rulePhaseForKind(kind: RuleKind): string {

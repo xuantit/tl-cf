@@ -328,6 +328,77 @@ export const RULE_PRESETS: RulePreset[] = [
       },
     }),
   },
+
+  // ─── WAF Custom Rules (security) ───────────────────────────────────────
+  {
+    key: 'security-block-xmlrpc',
+    kind: 'security',
+    label: 'Block xmlrpc.php',
+    hint: 'xmlrpc.php là mục tiêu brute-force phổ biến của WordPress — chặn hẳn nếu không dùng Jetpack/app mồi.',
+    build: () => ({
+      description: 'Block xmlrpc.php',
+      expression: '(http.request.uri.path eq "/xmlrpc.php")',
+      values: { security_action: 'block' },
+    }),
+  },
+  {
+    key: 'security-challenge-wp-login',
+    kind: 'security',
+    label: 'Challenge WordPress login',
+    hint: 'Managed Challenge cho /wp-login.php — chặn bot brute-force, người thật vẫn vào được.',
+    build: () => ({
+      description: 'Challenge WordPress login',
+      expression: '(http.request.uri.path contains "/wp-login.php")',
+      values: { security_action: 'managed_challenge' },
+    }),
+  },
+  {
+    key: 'security-block-sensitive-files',
+    kind: 'security',
+    label: 'Block access to sensitive files',
+    hint: 'Chặn dò quét wp-config, .env, .git — các file cấu hình không bao giờ nên lộ ra ngoài.',
+    build: () => ({
+      description: 'Block sensitive files',
+      expression:
+        '(http.request.uri.path contains "wp-config") or (http.request.uri.path contains ".env") or (http.request.uri.path contains ".git")',
+      values: { security_action: 'block' },
+    }),
+  },
+  {
+    key: 'security-challenge-scrapers',
+    kind: 'security',
+    label: 'Challenge scraper user agents',
+    hint: 'Managed Challenge cho các user agent scraper phổ biến (python-requests, Scrapy).',
+    build: () => ({
+      description: 'Challenge scraper user agents',
+      expression:
+        '(http.user_agent contains "python-requests") or (http.user_agent contains "Scrapy")',
+      values: { security_action: 'managed_challenge' },
+    }),
+  },
+  {
+    key: 'security-block-country',
+    kind: 'security',
+    label: 'Block a country',
+    hint: 'Chặn toàn bộ traffic từ một quốc gia — nhớ thay XX bằng mã ISO 3166-1 alpha-2 (vd CN, RU).',
+    build: () => ({
+      description: 'Block a country',
+      expression: '(ip.geoip.country eq "XX")',
+      values: { security_action: 'block' },
+    }),
+  },
+  {
+    key: 'security-challenge-admin-non-get',
+    kind: 'security',
+    label: 'Managed challenge for non-GET to admin',
+    hint: 'Thử thách mọi request POST/PUT… vào khu /admin — giảm bot dò form mà không khoá hẳn.',
+    build: () => ({
+      description: 'Managed challenge - non-GET to admin',
+      expression:
+        '(http.request.uri.path contains "/admin") and (http.request.method ne "GET")',
+      values: { security_action: 'managed_challenge' },
+    }),
+  },
 ]
 
 export function presetsForKind(kind: RuleKind): RulePreset[] {

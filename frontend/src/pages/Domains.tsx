@@ -21,6 +21,7 @@ import ConfirmDestructive from '../components/ConfirmDestructive'
 import BulkProgressModal from '../components/BulkProgressModal'
 import BulkAddDomainsPanel, { CreateZonesDone } from '../components/domains/BulkAddDomainsModal'
 import BulkDnsReplacePanel from '../components/domains/BulkDnsReplaceModal'
+import { CopyConfigPanel, CloneDomainPanel, type CloneSource } from '../components/domains/CopyClonePanels'
 import { DetailPanel, Dot, EmptyState, Banner, SkeletonLine, Tag } from '../components/ui'
 import type { DotStatus } from '../components/ui'
 
@@ -67,6 +68,10 @@ export default function Domains() {
   // Tag filter lives in the URL (?tag=a,b) so /tags and the palette can deep-link into it.
   const tagFilter = (searchParams.get('tag') || '').split(',').filter(Boolean)
   const [tagsToAssign, setTagsToAssign] = useState<string[]>([])
+  // Clone source is row-scoped, ephemeral state (no URL param — F5 restore not needed here)
+  const [cloneSource, setCloneSource] = useState<CloneSource | null>(null)
+  // Copy-config mở từ nút Copy trên dòng → nguồn chọn sẵn; mở từ bulk bar → null
+  const [copySourceId, setCopySourceId] = useState<string | null>(null)
 
   const setParams = (updates: Record<string, string | null>) => {
     setSearchParams(
@@ -240,6 +245,39 @@ export default function Domains() {
     },
     {
       title: '',
+      key: 'actions',
+      width: 110,
+      align: 'right',
+      render: (_: unknown, zone: Zone) => (
+        <span className="inline-flex">
+          <Button
+            type="link"
+            size="small"
+            className="font-mono !text-[11.5px]"
+            onClick={(e) => {
+              e.stopPropagation()
+              setCopySourceId(zone.id)
+              setParams({ modal: 'copy-config' })
+            }}
+          >
+            {t('Copy')}
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            className="font-mono !text-[11.5px]"
+            onClick={(e) => {
+              e.stopPropagation()
+              setCloneSource({ zoneId: zone.id, zoneName: zone.name })
+            }}
+          >
+            {t('Clone')}
+          </Button>
+        </span>
+      ),
+    },
+    {
+      title: '',
       key: 'chevron',
       width: 36,
       align: 'right',
@@ -264,6 +302,9 @@ export default function Domains() {
       </Popconfirm>
       <BulkActionButton onClick={() => setParams({ modal: 'bulk-dns' })}>
         ⇄ {t('DNS replace')}
+      </BulkActionButton>
+      <BulkActionButton onClick={() => setParams({ modal: 'copy-config' })}>
+        ⧉ {t('Copy config')}
       </BulkActionButton>
       <BulkActionButton onClick={() => setParams({ modal: 'tags' })}>
         ⊘ {t('Assign tags')}
@@ -459,7 +500,9 @@ export default function Domains() {
         jobId={jobId}
         open={!!jobId}
         onClose={closeBulkJob}
-        renderDone={(job) => (job.type === 'create-zones' ? <CreateZonesDone job={job} /> : null)}
+        renderDone={(job) =>
+          job.type === 'create-zones' || job.type === 'clone-domain' ? <CreateZonesDone job={job} /> : null
+        }
       />
       </div>
 
@@ -493,6 +536,31 @@ export default function Domains() {
         onClose={() => setParams({ modal: null })}
         zoneIds={selection.selected}
         zoneNames={Object.fromEntries(domains.map((d) => [d.id, d.name]))}
+      />
+
+      <CopyConfigPanel
+        open={activeModal === 'copy-config'}
+        zones={domains}
+        initialSourceZoneId={copySourceId}
+        initialTargetIds={selection.selected}
+        onClose={() => {
+          setCopySourceId(null)
+          setParams({ modal: null })
+        }}
+        onJobCreated={(id) => {
+          setCopySourceId(null)
+          setParams({ modal: null, job: id })
+          selection.clear()
+        }}
+      />
+
+      <CloneDomainPanel
+        source={cloneSource}
+        onClose={() => setCloneSource(null)}
+        onJobCreated={(id) => {
+          setCloneSource(null)
+          setParams({ job: id })
+        }}
       />
     </div>
   )

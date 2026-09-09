@@ -5,7 +5,7 @@ import { RULE_PRESETS, presetsForKind } from './rulePresets'
 
 describe('rule presets', () => {
   it('has suggestions for every rule kind', () => {
-    for (const kind of ['redirect', 'cache', 'configuration'] as RuleKind[]) {
+    for (const kind of ['redirect', 'cache', 'configuration', 'security'] as RuleKind[]) {
       expect(presetsForKind(kind).length).toBeGreaterThan(0)
     }
   })
@@ -21,6 +21,11 @@ describe('rule presets', () => {
       expect(built.expression.length, preset.key).toBeGreaterThan(0)
       expect(built.description.length, preset.key).toBeGreaterThan(0)
 
+      if (preset.kind === 'security') {
+        // WAF custom rules: action nằm ở cấp rule, action_parameters có thể rỗng.
+        expect(built.values.security_action, preset.key).toBeTruthy()
+        continue
+      }
       const params = fieldsToParams(preset.kind, built.values, built.advanced)
       expect(params, preset.key).toBeDefined()
       expect(Object.keys(params ?? {}).length, preset.key).toBeGreaterThan(0)

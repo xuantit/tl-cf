@@ -224,7 +224,7 @@ export default function DomainDetail() {
                   />
                 )}
                 {activeModule === 'rules' && <RulesTab zoneId={zoneId} zoneName={zone?.name} />}
-                {activeModule === 'security' && <SecurityTab zoneId={zoneId} />}
+                {activeModule === 'security' && <SecurityTab zoneId={zoneId} zoneName={zone?.name} />}
                 {activeModule === 'tags' && <TagsTab zoneId={zoneId} zone={zone} />}
                 {activeModule === 'analytics' && <OverviewTab zoneId={zoneId} zone={zone} />}
               </div>

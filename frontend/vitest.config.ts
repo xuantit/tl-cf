@@ -7,5 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Test antd nặng (Select/Table đo layout trong jsdom) hay vượt 5s khi máy tải — tránh flake
+    testTimeout: 15000,
   },
 })

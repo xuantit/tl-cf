@@ -15,7 +15,7 @@ export const rulesRouter = Router();
 
 rulesRouter.use(requireAuth);
 
-const RULE_KINDS: RuleKind[] = ["redirect", "cache", "configuration"];
+const RULE_KINDS: RuleKind[] = ["redirect", "cache", "configuration", "security"];
 
 function parseKind(value: string): RuleKind | null {
   return (RULE_KINDS as string[]).includes(value) ? (value as RuleKind) : null;

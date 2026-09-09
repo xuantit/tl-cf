@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // Port cố định riêng cho tl-cf (5173 hay bị project khác chiếm) — phải khớp CORS_ORIGINS backend
+    port: 5199,
+    strictPort: true,
     proxy: {
       '/api': { target: 'http://localhost:9001', changeOrigin: true },
     },

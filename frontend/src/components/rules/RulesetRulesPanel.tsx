@@ -26,6 +26,7 @@ import {
   fieldsForKind,
   fieldsToParams,
   paramsToFields,
+  securityActionLabel,
   summarizeActionParameters,
   type FieldDef,
   type RuleKind,
@@ -55,6 +56,7 @@ const KIND_TITLE: Record<RuleKind, string> = {
   redirect: 'Redirect Rules',
   cache: 'Cache Rules',
   configuration: 'Configuration Rules',
+  security: 'Custom rules (WAF)',
 }
 
 const BOOL3_OPTIONS = [
@@ -134,6 +136,8 @@ export default function RulesetRulesPanel({
         description: '',
         ...values,
         redirect_kind: kind === 'redirect' ? 'static' : undefined,
+        // Managed Challenge là lựa chọn Cloudflare khuyến nghị cho WAF custom rules.
+        security_action: kind === 'security' ? 'managed_challenge' : undefined,
       })
       setAdvancedJson('')
     } else if (activeModal === 'edit' && editingRule) {
@@ -143,6 +147,7 @@ export default function RulesetRulesPanel({
         expression: editingRule.expression,
         description: editingRule.description,
         ...values,
+        security_action: kind === 'security' ? editingRule.action : undefined,
       })
       setAdvancedJson(Object.keys(advanced).length > 0 ? JSON.stringify(advanced, null, 2) : '')
     }
@@ -157,6 +162,8 @@ export default function RulesetRulesPanel({
       enabled: values.enabled,
       description: values.description,
       expression: values.expression,
+      // Chỉ security có nhiều action; các kind khác dùng default action ở backend.
+      action: kind === 'security' ? (values.security_action as string) : undefined,
       actionParameters: fieldsToParams(kind, values, advanced),
     }
   }
@@ -324,6 +331,7 @@ export default function RulesetRulesPanel({
       ellipsis: { showTitle: false },
       render: (_v, record) => {
         const labels = summarizeActionParameters(kind, record.actionParameters).map((label) => t(label))
+        if (kind === 'security') labels.unshift(t(securityActionLabel(record.action)))
         if (labels.length === 0) return <Text type="secondary">—</Text>
         const text = labels.join(', ')
         return (
@@ -396,6 +404,8 @@ export default function RulesetRulesPanel({
               />
             ) : field.type === 'number' ? (
               <InputNumber style={{ width: '100%' }} min={0} />
+            ) : field.type === 'textarea' ? (
+              <Input.TextArea rows={4} />
             ) : (
               <Input />
             )}
@@ -439,7 +449,7 @@ export default function RulesetRulesPanel({
           ) : rules.length === 0 ? (
             /* Bảng rỗng không render header — tránh cột bị bóp nát trên mobile */
             <EmptyState
-              icon={kind === 'redirect' ? '⇄' : kind === 'cache' ? '⚡' : '⚙'}
+              icon={kind === 'redirect' ? '⇄' : kind === 'cache' ? '⚡' : kind === 'security' ? '⛨' : '⚙'}
               title={t('No {{kind}} created', { kind: t(KIND_TITLE[kind]) })}
               desc={t('Create the first rule with the button above')}
               className="!py-[24px]"

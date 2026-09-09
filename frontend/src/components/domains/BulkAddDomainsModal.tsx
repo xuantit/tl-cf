@@ -22,6 +22,19 @@ interface CreatedZoneResult {
   status: string
 }
 
+// create-zones results carry { name, zoneId, nameServers, status }; clone-domain results carry
+// { zoneId, nameservers, steps } with the new domain name as the item key. Normalize both.
+function toZoneResult(item: BulkJob['items'][number]): CreatedZoneResult | null {
+  if (item.status !== 'success' || !item.result) return null
+  const r = item.result as Partial<CreatedZoneResult> & { nameservers?: string[] }
+  return {
+    name: r.name || item.label || item.key,
+    zoneId: r.zoneId || item.key,
+    nameServers: r.nameServers || r.nameservers || [],
+    status: r.status || 'pending',
+  }
+}
+
 interface BulkAddDomainsPanelProps {
   open: boolean
   onClose: () => void
@@ -57,8 +70,8 @@ function parseLines(raw: string, existingNames: Set<string>): ParsedLine[] {
 function exportCsv(job: BulkJob) {
   const rows = [['name', 'zone_id', 'ns1', 'ns2', 'status']]
   for (const item of job.items) {
-    if (item.status === 'success' && item.result) {
-      const r = item.result as CreatedZoneResult
+    const r = toZoneResult(item)
+    if (r) {
       rows.push([r.name, r.zoneId, r.nameServers[0] || '', r.nameServers[1] || '', r.status])
     } else {
       rows.push([item.key, '', '', '', `error: ${item.error || 'unknown'}`])
@@ -96,8 +109,8 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
     { title: t('Status'), dataIndex: 'status', key: 'status', width: 100 },
   ]
   const results = job.items
-    .filter((i) => i.status === 'success' && i.result)
-    .map((i) => i.result as CreatedZoneResult)
+    .map((i) => toZoneResult(i))
+    .filter((r): r is CreatedZoneResult => r !== null)
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       {results.length > 0 && (
