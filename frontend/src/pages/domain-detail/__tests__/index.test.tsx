@@ -9,7 +9,7 @@ vi.mock('../../../services/api', () => ({
 
 import { useFocusMode } from '../../../stores/useFocusMode'
 import DomainDetail from '../index'
-import { mockDetailApi, renderWithProviders } from './testUtils'
+import { apiGet, mockDetailApi, renderWithProviders } from './testUtils'
 
 const MODULE_LABELS = ['DNS', 'Cache', 'Rules', 'Security', 'Tags', 'Analytics']
 
@@ -38,11 +38,14 @@ describe('DomainDetail shell', () => {
     expect(screen.queryByText('ana.ns.cloudflare.com')).not.toBeInTheDocument()
   })
 
-  it('shows the old OverviewTab content at ?tab=analytics', async () => {
+  it('shows domain traffic analytics at ?tab=analytics, not account-wide statistics', async () => {
     renderWithProviders(<DomainDetail />, '/domains/z1?tab=analytics')
 
-    expect(await screen.findByText('Zone ID')).toBeInTheDocument()
-    expect(await screen.findByText('ana.ns.cloudflare.com')).toBeInTheDocument()
+    expect(await screen.findByText('Requests by hour')).toBeInTheDocument()
+    expect(screen.getByText('7d')).toBeInTheDocument()
+    expect(apiGet.mock.calls.some(([url]) => url === '/analytics/zone/z1')).toBe(true)
+    expect(apiGet.mock.calls.some(([url]) => url === '/analytics/summary')).toBe(false)
+    expect(screen.queryByText('Recent changes')).not.toBeInTheDocument()
   })
 
   it('opens a module full screen when its card is clicked', async () => {

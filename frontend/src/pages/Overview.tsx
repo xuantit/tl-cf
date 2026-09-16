@@ -2,14 +2,13 @@ import { Button } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, apiErrorCode, apiErrorDetail } from '../services/api'
+import { api, apiErrorDetail } from '../services/api'
 import { useAccountStore } from '../stores/useAccountStore'
 import type { CfAccount } from '../components/AccountSwitcher'
-import type { AnalyticsSummary, DashboardSummary } from '../types/analytics'
+import type { DashboardSummary } from '../types/analytics'
 import PageHeader from '../components/PageHeader'
-import MetricsChart from '../components/monitoring/MetricsChart'
 import { Banner, Dot, EmptyState, KvRow, Lbl, SectionHeader, SkeletonLine, Tag } from '../components/ui'
-import { formatCompact, formatPercent, formatShare } from '../utils/format'
+import { formatPercent, formatShare } from '../utils/format'
 
 const CHANGE_STATUS_VARIANT: Record<string, 'ok' | 'err' | 'warn'> = {
   applied: 'ok',
@@ -56,15 +55,6 @@ export default function Overview() {
     enabled: !noAccounts,
   })
 
-  const analytics = useQuery<AnalyticsSummary>({
-    queryKey: ['analytics-summary', activeAccountId, '24h'],
-    queryFn: async () => (await api.get('/analytics/summary', { params: { range: '24h' } })).data,
-    enabled: !noAccounts,
-    retry: false,
-  })
-  const analyticsPermissionMissing =
-    analytics.isError && apiErrorCode(analytics.error) === 'ANALYTICS_PERMISSION_MISSING'
-
   const account = accounts?.find((a) => a.id === activeAccountId)
   const accountLabel = account?.label || account?.email
 
@@ -104,7 +94,6 @@ export default function Overview() {
               loading={isFetching && !isLoading}
               onClick={() => {
                 refetch()
-                analytics.refetch()
                 queryClient.invalidateQueries({ queryKey: ['domains'] })
               }}
             >
@@ -270,38 +259,6 @@ export default function Overview() {
               )}
             </div>
           </div>
-
-          {/* Requests 24h */}
-          <SectionHeader
-            title={t('Requests 24h · all zones')}
-            actions={
-              analytics.data ? (
-                <>
-                  <Tag>{formatCompact(analytics.data.totals.requests)}</Tag>
-                  <Tag variant="ok">hit {formatPercent(analytics.data.totals.cacheHitRatio)}%</Tag>
-                </>
-              ) : undefined
-            }
-          />
-          {analyticsPermissionMissing ? (
-            <Banner tone="info">
-              {t('The API token is missing the Zone → Analytics → Read permission, so charts are unavailable.')}
-            </Banner>
-          ) : analytics.isError ? (
-            <Banner tone="warn">
-              {apiErrorDetail(analytics.error) || t('Could not load analytics data')}
-            </Banner>
-          ) : analytics.isLoading ? (
-            <div className="flex flex-col gap-[14px] p-4">
-              <SkeletonLine width="100%" />
-              <SkeletonLine width="82%" />
-              <SkeletonLine width="64%" />
-            </div>
-          ) : (
-            <div className="py-[14px]">
-              <MetricsChart series={analytics.data?.series ?? []} range="24h" height={150} />
-            </div>
-          )}
 
           {/* Recent activity */}
           <SectionHeader

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -35,6 +35,7 @@ function renderShell(path = '/', role = 'admin') {
           <Route element={<AppShell />}>
             <Route index element={<div>home-page</div>} />
             <Route path="history" element={<div>history-page</div>} />
+            <Route path="tools/:tool" element={<div>tools-page</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -60,6 +61,9 @@ describe('AppShell', () => {
     expect(screen.getByText('Templates')).toBeInTheDocument()
     expect(screen.getAllByText('History').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Accounts')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cloudflare tools' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('link', { name: /Analytics/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Workers|Tunnels|Turnstile/ })).not.toBeInTheDocument()
     // Admin-only items
     expect(screen.getByText('Users')).toBeInTheDocument()
     expect(screen.getByText('Audit log')).toBeInTheDocument()
@@ -87,6 +91,42 @@ describe('AppShell', () => {
     renderShell('/')
     fireEvent.click(screen.getByRole('button', { name: /Quick find/ }))
     expect(await screen.findByPlaceholderText('Type to search…')).toBeInTheDocument()
+  })
+
+  it.each(['workers', 'tunnels', 'turnstile'])('highlights the same tools navigation entry on %s', async (tool) => {
+    renderShell(`/tools/${tool}`)
+    await screen.findByText('tools-page')
+    const parent = screen.getByRole('button', { name: 'Cloudflare tools' })
+    expect(parent).toHaveAttribute('aria-expanded', 'true')
+    expect(parent.className).toContain('bg-accent-soft')
+    const group = screen.getByRole('group', { name: 'Cloudflare tools' })
+    const activeLinks = within(group).getAllByRole('link').filter((link) => link.getAttribute('aria-current') === 'page')
+    expect(activeLinks).toHaveLength(1)
+    expect(activeLinks[0]).toHaveAttribute('href', `/tools/${tool}`)
+  })
+
+  it('expands/collapses tools inline without navigating, then opens the selected child', async () => {
+    renderShell('/')
+    await screen.findByText('home-page')
+    const parent = screen.getByRole('button', { name: 'Cloudflare tools' })
+    expect(parent).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('link', { name: 'Tunnels' })).not.toBeInTheDocument()
+    fireEvent.click(parent)
+    expect(parent).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('home-page')).toBeInTheDocument()
+    const group = screen.getByRole('group', { name: 'Cloudflare tools' })
+    expect(group.id).toBe(parent.getAttribute('aria-controls'))
+    expect(within(group).getAllByRole('link')).toHaveLength(3)
+    fireEvent.click(parent)
+    expect(screen.queryByRole('group', { name: 'Cloudflare tools' })).not.toBeInTheDocument()
+    fireEvent.click(parent)
+    fireEvent.click(screen.getByRole('link', { name: 'Tunnels' }))
+    expect(await screen.findByText('tools-page')).toBeInTheDocument()
+    expect(parent).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: 'Tunnels' })).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(parent)
+    expect(parent).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('tools-page')).toBeInTheDocument()
   })
 
   it('collapses the desktop sidebar when focus mode is active', async () => {

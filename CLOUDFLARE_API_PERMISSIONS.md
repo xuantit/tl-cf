@@ -58,7 +58,7 @@
 - ✅ **Zone → Zone → Edit**
 - ✅ **Account → Zone → Create** (có thể nằm trong Account Settings)
 
-### 6. **Analytics (trang Analytics / thống kê cache)**
+### 6. **Analytics theo domain (Domains → chọn domain → Analytics)**
 
 **Endpoint:** `POST /graphql` (Cloudflare GraphQL Analytics API — `httpRequests1hGroups` / `httpRequests1dGroups`)
 
@@ -67,10 +67,12 @@
 
 **Lưu ý:**
 - Nếu token thiếu quyền này, backend trả về **403** với mã lỗi `ANALYTICS_PERMISSION_MISSING` và frontend hiển thị banner "thiếu quyền".
+- Không còn mục Analytics tổng trong menu hoặc biểu đồ all-zones ở Overview. Bộ chọn 24h/7d/30d, biểu đồ, status codes và countries dùng `GET /api/analytics/zone/{zoneId}` của domain đang mở.
+- URL cũ `/analytics?zone={zoneId}&range=7d` chuyển vào domain tương ứng; `/analytics` không có zone chuyển về danh sách Domains. API summary cũ giữ tương thích nhưng giao diện không gọi nữa.
 - Global API Key luôn có đủ quyền; chỉ API Token scoped mới cần thêm quyền này.
 - Dữ liệu analytics được cache 60 giây phía backend để tránh rate limit.
 
-### 7. **Workers & Pages (trang Workers & Pages)**
+### 7. **Workers & Pages (Công cụ Cloudflare → Workers & Pages)**
 
 **Endpoints:**
 - Workers scripts: `GET/DELETE /accounts/{account_id}/workers/scripts`, `GET .../scripts/{name}/content/v2`, `GET/PUT .../scripts/{name}/schedules`, `GET/POST .../scripts/{name}/subdomain`, `GET/PUT/DELETE .../scripts/{name}/secrets`
@@ -87,7 +89,7 @@
 - Xoá deployment production **đang live** sẽ bị CF từ chối — muốn dọn sạch phải xoá cả project (tool có nút "Xoá tất cả" + "Xoá project").
 - Worker secrets là write-only: API không bao giờ trả về giá trị secret.
 
-### 8. **Cloudflare Tunnels (trang Tunnels)**
+### 8. **Cloudflare Tunnels (Công cụ Cloudflare → Tunnels)**
 
 **Endpoints:** `GET/POST/DELETE /accounts/{account_id}/cfd_tunnel` (+ `/configurations`, `/token`, `/connections`)
 
@@ -100,7 +102,7 @@
 - Token tunnel là bí mật (ai có token là chạy được connector) — tool chỉ hiển thị khi bấm Reveal và ghi audit log, không bao giờ ghi token vào log.
 - Tunnel tạo qua tool là remotely-managed (`config_src: cloudflare`) — cấu hình ingress quản lý từ dashboard/tool, không cần file config.yml phía connector.
 
-### 9. **Turnstile (trang Turnstile)**
+### 9. **Turnstile (Công cụ Cloudflare → Turnstile)**
 
 **Endpoints:** `GET/POST /accounts/{account_id}/challenges/widgets`, `GET/PUT/DELETE .../{sitekey}`, `POST .../{sitekey}/rotate_secret`.
 
@@ -112,6 +114,7 @@
 
 **Lưu ý:**
 - Account switcher của CF Tool chọn **credential đã lưu**; dropdown/ô Account ID trong trang Turnstile chọn **account thật bên Cloudflare**. Không mặc định lấy account đầu tiên khi token truy cập nhiều account.
+- Menu **Công cụ Cloudflare** xổ xuống chứa Workers & Pages, Tunnels, Turnstile (cả sidebar và menu More trên mobile), không có tab ngang cấp hub. Các route `/tools/workers`, `/tools/tunnels`, `/tools/turnstile` và redirect URL cũ giữ nguyên query. Query `tab=pages` vẫn chọn Pages bên trong Workers & Pages. Đổi tool/account sẽ unmount panel cũ và bỏ secret đã hiển thị.
 - API trả secret trong chi tiết/tạo/sửa nhưng tool loại bỏ secret khỏi các response thông thường. Chỉ `POST .../secret/reveal` hoặc `.../secret/rotate` trả secret, với `Cache-Control: no-store` và audit.
 - Secret không được lưu trong DB, change history hay React Query cache. Panel đóng/đổi account/widget sẽ bỏ secret khỏi giao diện.
 - Xoay secret mặc định giữ khóa cũ 2 giờ; Cloudflare không cho xoay tiếp trong thời gian chuyển đổi. Chọn vô hiệu ngay chỉ khi đã chuẩn bị cập nhật mọi backend dùng widget.

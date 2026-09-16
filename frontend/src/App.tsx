@@ -3,6 +3,7 @@ import { Spin } from 'antd'
 import { lazy, Suspense } from 'react'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppShell from './layouts/AppShell'
+import CloudflareTools from './layouts/CloudflareTools'
 import './App.css'
 
 const Domains = lazy(() => import('./pages/Domains'))
@@ -10,7 +11,6 @@ const DomainDetail = lazy(() => import('./pages/domain-detail'))
 const Overview = lazy(() => import('./pages/Overview'))
 const TagsPage = lazy(() => import('./pages/Tags'))
 const SettingsPage = lazy(() => import('./pages/Settings'))
-const Analytics = lazy(() => import('./pages/Analytics'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Templates = lazy(() => import('./pages/Templates'))
 const Tunnels = lazy(() => import('./pages/Tunnels'))
@@ -69,7 +69,7 @@ function App() {
             <Route path="overview" element={<Overview />} />
             <Route path="tags" element={<TagsPage />} />
             <Route path="settings" element={<SettingsPage />} />
-            <Route path="analytics" element={<Analytics />} />
+            <Route path="analytics" element={<RedirectZonePage tab="analytics" />} />
             <Route path="domains" element={<RedirectWithQuery to="/" />} />
             <Route path="domains/:zoneId" element={<DomainDetail />} />
             <Route path="modern-rules" element={<RedirectZonePage tab="rules" />} />
@@ -77,9 +77,16 @@ function App() {
             <Route path="dns" element={<RedirectZonePage tab="dns" />} />
             <Route path="cache" element={<RedirectZonePage tab="cache" />} />
             <Route path="templates" element={<Templates />} />
-            <Route path="workers" element={<WorkersPages />} />
-            <Route path="tunnels" element={<Tunnels />} />
-            <Route path="turnstile" element={<Turnstile />} />
+            <Route path="tools" element={<CloudflareTools />}>
+              <Route index element={<RedirectWithQuery to="/tools/workers" />} />
+              <Route path="workers" element={<WorkersPages />} />
+              <Route path="tunnels" element={<Tunnels />} />
+              <Route path="turnstile" element={<Turnstile />} />
+              <Route path="*" element={<RedirectWithQuery to="/tools/workers" />} />
+            </Route>
+            <Route path="workers" element={<RedirectWithQuery to="/tools/workers" />} />
+            <Route path="tunnels" element={<RedirectWithQuery to="/tools/tunnels" />} />
+            <Route path="turnstile" element={<RedirectWithQuery to="/tools/turnstile" />} />
             <Route path="history" element={<History />} />
             <Route path="jobs" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'jobs' }} />} />
             <Route path="changes" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'changes' }} />} />

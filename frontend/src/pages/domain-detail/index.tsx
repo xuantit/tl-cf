@@ -12,7 +12,7 @@ import type { DnsRecord, PageRule, ZoneAnalytics, ZoneDetail } from '../../types
 import type { DotStatus } from '../../components/ui'
 import { useFocusMode } from '../../stores/useFocusMode'
 import { formatBytes, formatCompact, formatPercent } from '../../utils/format'
-import OverviewTab from './OverviewTab'
+import Analytics from '../Analytics'
 import DnsTab from './DnsTab'
 import CacheTab from './CacheTab'
 import RulesTab from './RulesTab'
@@ -226,7 +226,7 @@ export default function DomainDetail() {
                 {activeModule === 'rules' && <RulesTab zoneId={zoneId} zoneName={zone?.name} />}
                 {activeModule === 'security' && <SecurityTab zoneId={zoneId} zoneName={zone?.name} />}
                 {activeModule === 'tags' && <TagsTab zoneId={zoneId} zone={zone} />}
-                {activeModule === 'analytics' && <OverviewTab zoneId={zoneId} zone={zone} />}
+                {activeModule === 'analytics' && <Analytics zoneId={zoneId} zoneName={zone?.name} />}
               </div>
               {/* Slot nhận DetailPanel qua portal */}
               <div ref={setPanelSlot} className="flex h-full flex-none" />

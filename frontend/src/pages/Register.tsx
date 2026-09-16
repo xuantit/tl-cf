@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Form, Input, Button, Alert } from 'antd'
 import { useTranslation } from 'react-i18next'
+import { z } from 'zod'
 import { api, apiErrorDetail } from '../services/api'
 import AuthCard from '../components/AuthCard'
 import TurnstileChallenge from '../components/TurnstileChallenge'
+
+// Match backend validation and use the same rule for the button and submission.
+const registrationEmail = z.string().trim().toLowerCase().email().max(254)
 
 export default function Register() {
   const { t } = useTranslation()
@@ -17,6 +21,8 @@ export default function Register() {
   const [cooldown, setCooldown] = useState(0)
   const coolingDown = cooldown > 0
   const [form] = Form.useForm<{ email: string }>()
+  const email = Form.useWatch('email', form)
+  const emailValid = registrationEmail.safeParse(email ?? '').success
 
   useEffect(() => {
     if (!coolingDown) return
@@ -26,12 +32,14 @@ export default function Register() {
 
   const onFinish = async ({ email }: { email: string }) => {
     if (submitting.current) return
+    const parsedEmail = registrationEmail.safeParse(email)
+    if (!parsedEmail.success) { setErr(t('Please enter a valid email')); return }
     if (turnstileToken === null) { setErr(t('Please complete anti-bot verification')); return }
     submitting.current = true
     setLoading(true)
     setErr('')
     try {
-      const normalizedEmail = email.trim().toLowerCase()
+      const normalizedEmail = parsedEmail.data
       const { data } = await api.post<{ retryAfter: number }>('/auth/register', {
         email: normalizedEmail, ...(turnstileToken ? { turnstileToken } : {}),
       })
@@ -72,7 +80,7 @@ export default function Register() {
               description={t('If {{email}} is eligible and within sending limits, a verification email will arrive shortly. Links expire 30 minutes after the first request; resending does not extend them.', { email: sentEmail })}
             />
             <p className="text-[12px] leading-relaxed text-fg-3">{t('Already registered? Sign in instead. Your password will not be changed.')}</p>
-            <Button block loading={loading} disabled={coolingDown || turnstileToken === null} onClick={() => onFinish({ email: sentEmail })}>
+            <Button block loading={loading} disabled={loading || coolingDown || turnstileToken === null} onClick={() => onFinish({ email: sentEmail })}>
               {coolingDown ? t('Resend in {{seconds}}s', { seconds: cooldown }) : t('Resend verification email')}
             </Button>
             <Button type="text" block disabled={loading} onClick={() => { setSentEmail(''); setErr('') }}>
@@ -91,8 +99,8 @@ export default function Register() {
             label="Email"
             normalize={(value: string) => value.trim()}
             rules={[
-              { required: true, type: 'email', message: t('Please enter a valid email') },
-              { max: 254 }
+              { validator: (_, value: unknown) => registrationEmail.safeParse(value).success
+                ? Promise.resolve() : Promise.reject(new Error(t('Please enter a valid email'))) }
             ]}
             style={{ marginBottom: 11 }}
           >
@@ -103,7 +111,7 @@ export default function Register() {
               type="primary"
               htmlType="submit"
               loading={loading}
-              disabled={turnstileToken === null}
+              disabled={loading || !emailValid || turnstileToken === null}
               block
               style={{ height: 32, marginTop: 14 }}
             >

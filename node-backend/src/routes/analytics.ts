@@ -92,6 +92,7 @@ analyticsRouter.get("/zone/:zoneId", async (req, res) => {
 
     const requests = zone?.totals.requests ?? 0;
     const cachedRequests = zone?.totals.cachedRequests ?? 0;
+    const { statusBuckets, topCountries } = summarize(perZone, {});
 
     res.json({
       totals: {
@@ -102,6 +103,8 @@ analyticsRouter.get("/zone/:zoneId", async (req, res) => {
         savedBytes: zone?.totals.cachedBytes ?? 0,
       },
       series: zone?.series ?? [],
+      statusBuckets,
+      topCountries,
       range,
     });
   } catch (error) {

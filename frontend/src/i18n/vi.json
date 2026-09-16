@@ -1,4 +1,7 @@
 {
+  "Cloudflare tools": "Công cụ Cloudflare",
+  "Account-level services: Workers & Pages, Tunnels and Turnstile": "Dịch vụ cấp tài khoản: Workers & Pages, Tunnels và Turnstile",
+  "Workers & Pages · Tunnels · Turnstile": "Workers & Pages · Tunnels · Turnstile",
   "Anti-bot verification": "Xác minh chống bot",
   "Please complete anti-bot verification": "Vui lòng hoàn tất xác minh chống bot",
   "Anti-bot verification unavailable or expired. Please retry.": "Xác minh chống bot bị gián đoạn hoặc hết hạn. Vui lòng thử lại.",

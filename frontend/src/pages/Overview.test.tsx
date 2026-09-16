@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -45,16 +45,6 @@ const summary = {
   ],
 }
 
-const analytics = {
-  totals: { requests: 18400000, bytes: 1, cachedRequests: 17000000, cacheHitRatio: 0.942, savedBytes: 1 },
-  series: [],
-  topZones: [],
-  statusBuckets: { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 },
-  topCountries: [],
-  zoneCount: 305,
-  range: '24h',
-}
-
 function renderOverview() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -71,7 +61,6 @@ describe('Overview', () => {
     vi.clearAllMocks()
     apiGet.mockImplementation(async (url: string) => {
       if (url === '/dashboard/summary') return { data: summary }
-      if (url === '/analytics/summary') return { data: analytics }
       if (url === '/cf/accounts')
         return { data: [{ id: 'a1', label: 'Main account', authType: 'apiToken', isActive: true }] }
       return { data: [] }
@@ -107,7 +96,6 @@ describe('Overview', () => {
     apiGet.mockImplementation(async (url: string) => {
       if (url === '/dashboard/summary')
         return { data: { ...summary, attention: { pendingNs: 0, sslOff: 0, devMode: 0 } } }
-      if (url === '/analytics/summary') return { data: analytics }
       if (url === '/cf/accounts')
         return { data: [{ id: 'a1', label: 'Main account', authType: 'apiToken', isActive: true }] }
       return { data: [] }
@@ -115,5 +103,14 @@ describe('Overview', () => {
     renderOverview()
     expect(await screen.findByText('305')).toBeInTheDocument()
     expect(screen.queryByText(/zones have SSL off/)).not.toBeInTheDocument()
+  })
+
+  it('does not request or display cross-domain traffic, including on refresh', async () => {
+    renderOverview()
+    await screen.findByText('305')
+    expect(screen.queryByText('Requests 24h · all zones')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+    await waitFor(() => expect(apiGet.mock.calls.filter(([url]) => url === '/dashboard/summary').length).toBeGreaterThan(1))
+    expect(apiGet.mock.calls.some(([url]) => url.startsWith('/analytics'))).toBe(false)
   })
 })

@@ -72,6 +72,8 @@ describe('CommandPalette', () => {
     expect(screen.getByText('Templates')).toBeInTheDocument()
     expect(screen.getByText('History')).toBeInTheDocument()
     expect(screen.getByText('Accounts')).toBeInTheDocument()
+    expect(screen.getByText('Cloudflare tools')).toBeInTheDocument()
+    expect(screen.queryByText('Analytics')).not.toBeInTheDocument()
   })
 
   it('closes with Escape', async () => {
@@ -122,5 +124,18 @@ describe('CommandPalette', () => {
 
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(screen.getByTestId('location')).toHaveTextContent('/templates')
+  })
+
+  it.each([
+    ['Workers & Pages', '/tools/workers'], ['Tunnels', '/tools/tunnels'], ['Turnstile', '/tools/turnstile'],
+  ])('finds nested %s directly without opening the dropdown', async (label, path) => {
+    renderPalette()
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    await screen.findByText('tienlen.vn')
+    const input = screen.getByPlaceholderText('Type to search…')
+    fireEvent.change(input, { target: { value: label } })
+    expect(screen.getByText(label)).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByTestId('location')).toHaveTextContent(path)
   })
 })

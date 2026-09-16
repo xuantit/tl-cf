@@ -94,6 +94,9 @@ export interface ZoneAnalytics {
     savedBytes: number
   }
   series: Array<{ ts: string; requests: number; bytes: number; cachedRequests: number }>
+  // Optional for compatibility with older API deployments and overview fixtures.
+  statusBuckets?: { '2xx': number; '3xx': number; '4xx': number; '5xx': number }
+  topCountries?: Array<{ country: string; requests: number }>
   range: string
 }
 

@@ -7,9 +7,21 @@ export interface NavEntry {
   adminOnly?: boolean
   /** Sidebar grouping — 'account' entries render after the first separator. */
   section?: 'account'
+  /** Expandable menu entries; child routes are also searchable in the palette. */
+  children?: NavEntry[]
 }
 
-// Mockup 2 sidebar order: Domains, Templates, Lịch sử, Tags, Analytics,
+export const CLOUDFLARE_TOOLS_NAV: NavEntry = {
+  path: '/tools', icon: '⚒', label: 'Cloudflare tools',
+  children: [
+    { path: '/tools/workers', icon: 'ƒ', label: 'Workers & Pages' },
+    { path: '/tools/tunnels', icon: '⇌', label: 'Tunnels' },
+    { path: '/tools/turnstile', icon: '◈', label: 'Turnstile' },
+  ],
+}
+
+// Domain analytics lives in /domains/:zoneId?tab=analytics. Account services share /tools.
+// Sidebar order: Domains, Templates, Lịch sử, Tags, Công cụ Cloudflare,
 // — Tài khoản, Cài đặt, — Người dùng, Audit log (+ Tổng quan on top).
 export const NAV_ITEMS: NavEntry[] = [
   { path: '/overview', icon: '▦', label: 'Overview' },
@@ -17,10 +29,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { path: '/templates', icon: '▤', label: 'Templates' },
   { path: '/history', icon: '◷', label: 'History' },
   { path: '/tags', icon: '⊘', label: 'Tags' },
-  { path: '/analytics', icon: '◱', label: 'Analytics' },
-  { path: '/workers', icon: 'ƒ', label: 'Workers & Pages' },
-  { path: '/tunnels', icon: '⇌', label: 'Tunnels' },
-  { path: '/turnstile', icon: '◈', label: 'Turnstile' },
+  CLOUDFLARE_TOOLS_NAV,
   { path: '/accounts', icon: '⌂', label: 'Accounts', section: 'account' },
   { path: '/settings', icon: '⚙', label: 'Settings', section: 'account' },
   { path: '/users', icon: '◉', label: 'Users', adminOnly: true },

@@ -80,6 +80,7 @@ function PalettePanel({ onClose }: { onClose: () => void }) {
   const navItems: PaletteItem[] = useMemo(
     () =>
       NAV_ITEMS.filter((n) => isAdmin || !n.adminOnly)
+        .flatMap((n) => [n, ...(n.children ?? []).filter((child) => isAdmin || !child.adminOnly)])
         .map((n) => ({ key: `n:${n.path}`, icon: n.icon, label: t(n.label), to: n.path }))
         .filter((n) => !q || n.label.toLowerCase().includes(q)),
     [isAdmin, t, q],

@@ -18,6 +18,7 @@ import { useSelectionMode } from '../stores/useSelectionMode'
 import { useFocusMode } from '../stores/useFocusMode'
 import AccountSwitcher from '../components/AccountSwitcher'
 import CommandPalette from '../components/CommandPalette'
+import NavMenuGroup from '../components/NavMenuGroup'
 import { Kbd } from '../components/ui'
 import { NAV_ITEMS, isNavActive } from './nav'
 
@@ -184,7 +185,7 @@ export default function AppShell() {
       icon: '⋯',
       label: t('More'),
       to: '/more',
-      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/analytics', '/overview', '/workers', '/tunnels', '/turnstile'].some(
+      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/overview', '/tools'].some(
         (p) => isNavActive(p, location.pathname),
       ),
     },
@@ -227,7 +228,9 @@ export default function AppShell() {
 
         {/* Nav (.ni) */}
         <nav className="flex flex-1 flex-col gap-[1px] overflow-y-auto">
-          {mainNav.map((item) => (
+          {mainNav.map((item) => item.children ? (
+            <NavMenuGroup key={item.path} item={item} />
+          ) : (
             <SideNavItem
               key={item.path}
               to={item.path}

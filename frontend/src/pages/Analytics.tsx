@@ -4,7 +4,8 @@ import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorCode, apiErrorDetail } from '../services/api'
 import { useAccountStore } from '../stores/useAccountStore'
-import type { AnalyticsRange, AnalyticsSummary } from '../types/analytics'
+import type { AnalyticsRange } from '../types/analytics'
+import type { ZoneAnalytics } from '../types/domain'
 import PageHeader from '../components/PageHeader'
 import MetricsChart from '../components/monitoring/MetricsChart'
 import { Banner, Dot, EmptyState, KvRow, Lbl, SectionHeader, SkeletonLine, StatStrip, Tag } from '../components/ui'
@@ -20,8 +21,8 @@ const STATUS_ROWS: Array<{ key: '2xx' | '3xx' | '4xx' | '5xx'; dot: DotStatus; t
   { key: '5xx', dot: 'err', tag: 'err' },
 ]
 
-/** Analytics (route /analytics) — 2.html "analytics" view over GET /analytics/summary. */
-export default function Analytics() {
+/** Domain-only analytics; mounted by /domains/:zoneId?tab=analytics. */
+export default function Analytics({ zoneId, zoneName }: { zoneId: string; zoneName?: string }) {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeAccountId = useAccountStore((s) => s.activeAccountId)
@@ -31,10 +32,12 @@ export default function Analytics() {
     ? (rangeParam as AnalyticsRange)
     : '24h'
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<AnalyticsSummary>({
-    queryKey: ['analytics-summary', activeAccountId, range],
-    queryFn: async () => (await api.get('/analytics/summary', { params: { range } })).data,
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<ZoneAnalytics>({
+    queryKey: ['domain-analytics-detail', activeAccountId, zoneId, range],
+    queryFn: async ({ signal }) => (await api.get(`/analytics/zone/${encodeURIComponent(zoneId)}`, { params: { range, ...(activeAccountId ? { accountId: activeAccountId } : {}) }, signal })).data,
+    enabled: !!zoneId,
     retry: false,
+    staleTime: 60_000,
   })
   const permissionMissing = isError && apiErrorCode(error) === 'ANALYTICS_PERMISSION_MISSING'
 
@@ -42,15 +45,19 @@ export default function Analytics() {
 
   const header = (
     <PageHeader
-      title="Analytics"
-      crumb={data ? `${t('{{count}} zones', { count: data.zoneCount })} · ${rangeLabel}` : rangeLabel}
+      title={zoneName || zoneId}
+      crumb={rangeLabel}
       actions={
         <Segmented
           size="small"
           value={range}
-          onChange={(value) =>
-            setSearchParams(value === '24h' ? {} : { range: String(value) }, { replace: true })
-          }
+          onChange={(value) => setSearchParams((prev) => {
+            const next = new URLSearchParams(prev)
+            next.set('tab', 'analytics')
+            if (value === '24h') next.delete('range')
+            else next.set('range', String(value))
+            return next
+          }, { replace: true })}
           options={RANGES.map((r) => ({ value: r, label: r }))}
         />
       }
@@ -59,7 +66,7 @@ export default function Analytics() {
 
   if (permissionMissing) {
     return (
-      <div className="fade-in p-[clamp(12px,3vw,24px)]">
+      <div className="fade-in py-4">
         {header}
         <Banner tone="warn">
           {t('The Cloudflare API token is missing the permission required for analytics.')}
@@ -86,10 +93,10 @@ export default function Analytics() {
 
   const totals = data?.totals
   const totalRequests = totals?.requests ?? 0
-  const err5xxRate = totalRequests > 0 ? ((data?.statusBuckets['5xx'] ?? 0) / totalRequests) * 100 : 0
+  const err5xxRate = totalRequests > 0 ? ((data?.statusBuckets?.['5xx'] ?? 0) / totalRequests) * 100 : 0
 
   return (
-    <div className="fade-in p-[clamp(12px,3vw,24px)]">
+    <div className="fade-in py-4">
       {header}
 
       {isError && (
@@ -123,12 +130,12 @@ export default function Analytics() {
                 delta: t('saved {{amount}}', { amount: formatBytesStr(totals.savedBytes) }),
                 deltaTone: 'up',
               },
-              {
+              ...(data.statusBuckets ? [{
                 value: `${err5xxRate.toFixed(2)}%`,
                 label: t('5xx rate'),
                 delta: formatCompact(data.statusBuckets['5xx']),
-                deltaTone: err5xxRate > 1 ? 'down' : 'muted',
-              },
+                deltaTone: err5xxRate > 1 ? 'down' as const : 'muted' as const,
+              }] : []),
             ]}
           />
 
@@ -137,23 +144,8 @@ export default function Analytics() {
             <MetricsChart series={data.series} range={range} height={190} />
           </div>
 
-          <div className="grid grid-cols-1 border-y border-stroke md:grid-cols-3">
-            <div className="border-b border-stroke p-[13px_16px] md:border-b-0">
-              <Lbl className="mb-[9px] block">{t('Top zones by requests')}</Lbl>
-              {data.topZones.length === 0 && <div className="py-2 font-mono text-[11px] text-fg-3">—</div>}
-              {data.topZones.slice(0, 6).map((zone) => (
-                <KvRow
-                  key={zone.zoneTag}
-                  k={<span className="font-mono text-[11.5px]">{zone.name}</span>}
-                  v={
-                    <>
-                      {formatCompact(zone.requests)} <Tag>{formatShare(zone.requests, totals.requests)}</Tag>
-                    </>
-                  }
-                />
-              ))}
-            </div>
-            <div className="border-b border-stroke p-[13px_16px] md:border-b-0 md:border-l md:border-l-stroke">
+          <div className="grid grid-cols-1 border-y border-stroke md:grid-cols-2">
+            {data.statusBuckets && <div className="border-b border-stroke p-[13px_16px] md:border-b-0">
               <Lbl className="mb-[9px] block">{t('Status codes')}</Lbl>
               {STATUS_ROWS.map(({ key, dot, tag }) => (
                 <KvRow
@@ -165,14 +157,14 @@ export default function Analytics() {
                   }
                   v={
                     <>
-                      {formatCompact(data.statusBuckets[key])}{' '}
-                      <Tag variant={tag}>{formatShare(data.statusBuckets[key], totals.requests)}</Tag>
+                      {formatCompact(data.statusBuckets![key])}{' '}
+                      <Tag variant={tag}>{formatShare(data.statusBuckets![key], totals.requests)}</Tag>
                     </>
                   }
                 />
               ))}
-            </div>
-            <div className="p-[13px_16px] md:border-l md:border-l-stroke">
+            </div>}
+            {data.topCountries && <div className="p-[13px_16px] md:border-l md:border-l-stroke">
               <Lbl className="mb-[9px] block">{t('Countries')}</Lbl>
               {data.topCountries.length === 0 && <div className="py-2 font-mono text-[11px] text-fg-3">—</div>}
               {data.topCountries.map((row) => (
@@ -186,7 +178,7 @@ export default function Analytics() {
                   }
                 />
               ))}
-            </div>
+            </div>}
           </div>
         </>
       ) : null}

@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore, getRoleFromToken, getEmailFromToken } from '../stores/useAuthStore'
 import { useThemeStore } from '../stores/useThemeStore'
 import { SectionHeader, Tag } from '../components/ui'
+import NavMenuGroup from '../components/NavMenuGroup'
+import { CLOUDFLARE_TOOLS_NAV } from '../layouts/nav'
 
 function MoreRow({ to, icon, label, meta }: { to: string; icon: string; label: string; meta?: string }) {
   return (
@@ -46,10 +48,7 @@ export default function More() {
       <MoreRow to="/accounts" icon="⌂" label={t('Accounts')} />
       <MoreRow to="/templates" icon="▤" label="Templates" />
       <MoreRow to="/tags" icon="⊘" label="Tags" />
-      <MoreRow to="/analytics" icon="◱" label="Analytics" />
-      <MoreRow to="/workers" icon="ƒ" label={t('Workers & Pages')} />
-      <MoreRow to="/tunnels" icon="⇌" label="Tunnels" />
-      <MoreRow to="/turnstile" icon="◈" label="Turnstile" />
+      <NavMenuGroup item={CLOUDFLARE_TOOLS_NAV} mobile />
 
       {isAdmin && (
         <>

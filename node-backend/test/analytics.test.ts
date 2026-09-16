@@ -211,8 +211,9 @@ describe("GET /api/analytics/summary", () => {
 });
 
 describe("GET /api/analytics/zone/:zoneId", () => {
-  it("returns single-zone totals and series", async () => {
-    mockGraphqlOk();
+  it("returns totals, series, status codes and countries scoped to one zone", async () => {
+    const gqlSpy = mockGraphqlOk();
+    const listSpy = vi.spyOn(cloudflareService, "listZones");
 
     const res = await request(app)
       .get(`/api/analytics/zone/zone-9?accountId=${accountId}&range=24h`)
@@ -230,6 +231,12 @@ describe("GET /api/analytics/zone/:zoneId", () => {
       { ts: "2026-07-28T00:00:00Z", requests: 100, bytes: 1000, cachedRequests: 80, cachedBytes: 600 },
     ]);
     expect(res.body.range).toBe("24h");
+    expect(res.body.statusBuckets).toEqual({ "2xx": 90, "3xx": 4, "4xx": 4, "5xx": 2 });
+    expect(res.body.topCountries).toEqual([{ country: "US", requests: 60 }, { country: "VN", requests: 40 }]);
+    expect(res.body.topZones).toBeUndefined();
+    expect(listSpy).not.toHaveBeenCalled();
+    expect(gqlSpy).toHaveBeenCalledTimes(1);
+    expect(gqlSpy.mock.calls[0][2]).toMatchObject({ zoneTags: ['zone-9'] });
   });
 
   it("maps permission errors to 403 ANALYTICS_PERMISSION_MISSING", async () => {

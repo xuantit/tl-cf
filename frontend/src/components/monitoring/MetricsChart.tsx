@@ -12,7 +12,7 @@ import type { AnalyticsRange, SeriesPoint } from '../../types/analytics'
 import { formatCompact } from '../../utils/format'
 
 interface MetricsChartProps {
-  series: SeriesPoint[]
+  series: Pick<SeriesPoint, 'ts' | 'requests'>[]
   range?: AnalyticsRange
   height?: number
 }
