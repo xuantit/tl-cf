@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.turnstile.*
+.deployment-backups/
 logs/
 *.log
 config/accounts.json

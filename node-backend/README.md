@@ -2,6 +2,11 @@
 
 Backend được viết bằng Node.js + Express + PostgreSQL (Drizzle ORM).
 
+## Đăng ký bằng email (Resend)
+
+Mã mời tạm thời được thay bằng xác minh email. Người dùng nhập email, nhận liên kết,
+rồi đặt mật khẩu để tạo tài khoản. Cấu hình và triển khai: [EMAIL_REGISTRATION.md](../EMAIL_REGISTRATION.md).
+
 ## Database (Postgres + Drizzle)
 
 Quy trình chuẩn để có DB sẵn sàng test:
@@ -11,7 +16,7 @@ cp .env.example .env          # điền DATABASE_URL, ENCRYPTION_KEY (64 hex)...
 npm install
 
 npm run db:setup              # chạy migrations + seed (admin/demo/dữ liệu mẫu)
-npm run db:check              # kiểm tra kết nối + đủ 12 bảng
+npm run db:check              # kiểm tra kết nối + đủ 14 bảng
 ```
 
 Các script DB:
@@ -96,7 +101,8 @@ Tables được tạo tự động:
 
 ## API Endpoints
 
-- `POST /api/auth/register` - Đăng ký user mới
+- `POST /api/auth/register` - Gửi/gửi lại email xác minh, body `{ email }`
+- `POST /api/auth/verify-email` - Tạo user sau xác minh, body `{ token, password }`
 - `POST /api/auth/login` - Đăng nhập, nhận JWT token
 - `POST /api/cf/credentials` - Lưu Cloudflare credentials (email + Global API Key)
 - `GET /api/cf/credentials` - Lấy thông tin credentials đã lưu

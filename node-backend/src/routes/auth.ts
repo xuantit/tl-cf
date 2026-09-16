@@ -1,124 +1,139 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
-import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 
-import { findUserByEmail, createUser } from "../models/userJson.js";
+import { findUserByEmail } from "../models/userJson.js";
 import { requireAuth } from "../middleware/auth.js";
-import { sensitiveLimiter } from "../middleware/rateLimit.js";
+import { authLimiter, registrationEmailLimiter, sensitiveLimiter } from "../middleware/rateLimit.js";
 import { db } from "../services/db.js";
-import { inviteCodes, sessions, users } from "../db/schema.js";
+import { sessions, users } from "../db/schema.js";
+import { completeRegistration, requestRegistration, REGISTRATION_RESEND_SECONDS } from "../services/registration.js";
+import { RegistrationError } from "../services/registrationEmail.js";
+import { publicTurnstileConfig, verifyTurnstile } from "../services/turnstileVerification.js";
 import { env } from "../utils/env.js";
 import logger from "../utils/logger.js";
 
 export const authRouter = Router();
 
-// Allow creating first admin user without authentication
+function logRegistrationFailure(message: string, error: unknown) {
+  // Drizzle query errors can include SQL parameters (password hashes/tokens).
+  // Log only the PostgreSQL SQLSTATE, never the raw error, query or parameters.
+  let cause: unknown = error;
+  let databaseCode: string | undefined;
+  let connectionFailure = false;
+  for (let depth = 0; depth < 4 && cause && typeof cause === "object"; depth++) {
+    if (cause instanceof Error && /connection terminated|timeout|socket|ECONN|EPIPE/i.test(cause.message)) {
+      connectionFailure = true;
+    }
+    if ("code" in cause && typeof cause.code === "string" && /^[A-Z0-9_]{3,40}$/.test(cause.code)) {
+      databaseCode = cause.code;
+      break;
+    }
+    cause = "cause" in cause ? cause.cause : undefined;
+  }
+  logger.error(message, { databaseCode, connectionFailure });
+}
+
+// Bootstrap is disabled unless an operator explicitly configures a secret.
 authRouter.post("/setup", async (req, res) => {
+  const supplied = req.get("X-Setup-Token") || "";
+  const expected = env.INITIAL_SETUP_TOKEN;
+  if (!expected || supplied.length > 256 || !timingSafeEqual(
+    createHash("sha256").update(supplied).digest(), createHash("sha256").update(expected).digest(),
+  )) return res.status(403).json({ detail: "Initial setup is disabled or not authorized." });
+  const parsed = z.object({
+    email: z.string().trim().toLowerCase().email().max(254),
+    password: z.string().min(8).refine((value) => Buffer.byteLength(value, "utf8") <= 72),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ detail: "Invalid setup input." });
   try {
-    const bodySchema = z.object({
-      email: z.string().email(),
-      password: z.string().min(8),
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+    const user = await db.transaction(async (tx) => {
+      // Serializes bootstrap and all User inserts, including regular signup.
+      await tx.execute(sql`LOCK TABLE "User" IN SHARE ROW EXCLUSIVE MODE`);
+      if (await tx.query.users.findFirst({ columns: { id: true } })) return null;
+      const [created] = await tx.insert(users).values({ email: parsed.data.email, passwordHash, role: "admin" })
+        .returning({ id: users.id, email: users.email, role: users.role });
+      return created;
     });
-    const body = bodySchema.parse(req.body);
-
-    // Check if any users exist
-    const { configService } = await import("../services/configService.js");
-    await configService.loadConfig();
-    const existingUsers = await configService.getAllUsers();
-
-    if (existingUsers.length > 0) {
+    if (!user) {
       return res.status(403).json({ detail: "Initial setup already completed. Use /register instead." });
     }
-
-    const passwordHash = await bcrypt.hash(body.password, 12);
-    const user = await createUser({ email: body.email, passwordHash, role: "admin" });
-
     logger.info("Initial admin user created", { userId: user.id, email: user.email });
-    res.json({ id: user.id, email: user.email, role: user.role });
-  } catch (error: any) {
-    logger.error("Setup error", { error: error.message });
-    res.status(400).json({ detail: error.message || "Failed to setup initial user" });
+    res.json(user);
+  } catch (error) {
+    logRegistrationFailure("Setup failed", error);
+    res.status(500).json({ detail: "Failed to setup initial user" });
   }
 });
 
-authRouter.post("/register", async (req, res) => {
+authRouter.get('/turnstile', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(publicTurnstileConfig()); }
+  catch (error) {
+    if (error instanceof RegistrationError) return res.status(error.status).json({ code: error.code, detail: error.message });
+    res.status(503).json({ detail: 'Anti-bot verification unavailable' });
+  }
+});
+
+authRouter.post("/register", registrationEmailLimiter, async (req, res) => {
+  const parsed = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ detail: "Vui lòng nhập địa chỉ email hợp lệ." });
+  }
   try {
-    const bodySchema = z.object({
-      email: z.string().email(),
-      password: z.string().min(8),
-      inviteCode: z.string().min(1, "Invite code is required"),
+    await verifyTurnstile(req.body?.turnstileToken, 'register');
+    await requestRegistration(parsed.data.email);
+    res.status(202).json({
+      verificationRequired: true,
+      retryAfter: REGISTRATION_RESEND_SECONDS,
+      detail: "Nếu email chưa được đăng ký, bạn sẽ nhận được liên kết xác minh. Vui lòng kiểm tra cả thư mục spam.",
     });
-    const body = bodySchema.parse(req.body);
-
-    const invite = await db.query.inviteCodes.findFirst({
-      where: eq(inviteCodes.code, body.inviteCode.trim()),
-    });
-    if (!invite) {
-      logger.warn("Registration with invalid invite code", { email: body.email });
-      return res.status(403).json({ detail: "Mã mời không hợp lệ" });
-    }
-    if (invite.expiresAt && invite.expiresAt < new Date()) {
-      return res.status(403).json({ detail: "Mã mời đã hết hạn" });
-    }
-    if (invite.usedCount >= invite.maxUses) {
-      return res.status(403).json({ detail: "Mã mời đã được dùng hết" });
-    }
-
-    const existing = await findUserByEmail(body.email);
-    if (existing) {
-      logger.warn("Registration attempt with existing email", { email: body.email });
-      return res.status(409).json({ detail: "Email already exists" });
-    }
-
-    // Tăng usedCount atomic — nếu 2 request cùng lúc vượt maxUses thì request sau fail
-    const claimed = await db
-      .update(inviteCodes)
-      .set({ usedCount: sql`${inviteCodes.usedCount} + 1` })
-      .where(and(eq(inviteCodes.id, invite.id), lt(inviteCodes.usedCount, invite.maxUses)))
-      .returning({ id: inviteCodes.id });
-    if (claimed.length === 0) {
-      return res.status(403).json({ detail: "Mã mời đã được dùng hết" });
-    }
-
-    const passwordHash = await bcrypt.hash(body.password, 12);
-    const user = await createUser({ email: body.email, passwordHash, role: "user" });
-
-    // Ghi lại email đã dùng code (best-effort)
-    try {
-      const fresh = await db.query.inviteCodes.findFirst({ where: eq(inviteCodes.id, invite.id) });
-      if (fresh) {
-        const usedBy = JSON.parse(fresh.usedByJson) as string[];
-        usedBy.push(user.email);
-        await db
-          .update(inviteCodes)
-          .set({ usedByJson: JSON.stringify(usedBy) })
-          .where(eq(inviteCodes.id, invite.id));
-      }
-    } catch (e) {
-      logger.warn("Failed to record invite usage", { inviteId: invite.id, error: (e as Error).message });
-    }
-
-    logger.info("User registered", { userId: user.id, email: user.email, inviteId: invite.id });
-    res.json({ id: user.id, email: user.email, role: user.role });
   } catch (error) {
-    logger.error("Registration error", { error, email: req.body?.email });
-    throw error;
+    if (error instanceof RegistrationError) {
+      logger.warn("Registration email unavailable", { code: error.code });
+      return res.status(error.status).json({ code: error.code, detail: error.message });
+    }
+    logRegistrationFailure("Registration request failed", error);
+    res.status(500).json({ detail: "Không thể đăng ký lúc này. Vui lòng thử lại sau." });
+  }
+});
+
+authRouter.post("/verify-email", authLimiter, async (req, res) => {
+  const parsed = z.object({
+    token: z.string().regex(/^[a-f0-9]{64}$/),
+    password: z.string().min(8).refine((v) => Buffer.byteLength(v, "utf8") <= 72),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ detail: "Liên kết không hợp lệ hoặc mật khẩu không đủ 8 ký tự / vượt quá 72 byte." });
+  }
+  try {
+    await verifyTurnstile(req.body?.turnstileToken, 'verify_email');
+    const user = await completeRegistration(parsed.data.token, parsed.data.password);
+    logger.info("Email registration completed", { userId: user.id });
+    res.status(201).json(user);
+  } catch (error) {
+    if (error instanceof RegistrationError) {
+      return res.status(error.status).json({ code: error.code, detail: error.message });
+    }
+    logRegistrationFailure("Email verification failed", error);
+    res.status(500).json({ detail: "Không thể xác minh email lúc này. Vui lòng thử lại sau." });
   }
 });
 
 authRouter.post("/login", async (req, res) => {
+  const parsed = z.object({
+    email: z.string().trim().email().max(254), password: z.string().min(1).max(1024),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ detail: "Invalid login input." });
   try {
-    const bodySchema = z.object({
-      email: z.string().email(),
-      password: z.string().min(1),
-    });
-    const body = bodySchema.parse(req.body);
+    const body = parsed.data;
 
-    const user = await findUserByEmail(body.email);
+    const user = await findUserByEmail(body.email) ?? await findUserByEmail(body.email.toLowerCase());
     if (!user) {
       logger.warn("Login attempt with invalid email", { email: body.email });
       return res.status(401).json({ detail: "Invalid credentials" });
@@ -158,8 +173,8 @@ authRouter.post("/login", async (req, res) => {
       user: { userId: user.id, email: user.email, role: fresh.role, displayName: fresh.displayName },
     });
   } catch (error) {
-    logger.error("Login error", { error, email: req.body?.email });
-    throw error;
+    logRegistrationFailure("Login failed", error);
+    res.status(500).json({ detail: "Login temporarily unavailable." });
   }
 });
 

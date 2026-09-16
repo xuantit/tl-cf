@@ -8,7 +8,7 @@ const port = env.PORT;
 async function start() {
   try {
     await recoverInterruptedJobs();
-    app.listen(port, () => {
+    app.listen(port, env.HOST, () => {
       logger.info(`API listening on http://localhost:${port}`);
       logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
       logger.info("JSON config system is ready. Accounts can be managed via API.");

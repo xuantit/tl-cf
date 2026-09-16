@@ -35,6 +35,31 @@ export const users = pgTable("User", {
   updatedAt: updatedAt(),
 });
 
+// No User row (and no login access) exists until the email owner sets a password.
+export const pendingRegistrations = pgTable(
+  "PendingRegistration",
+  {
+    email: text("email").primaryKey(),
+    tokenHash: text("tokenHash").notNull().unique(),
+    // AES-GCM ciphertext permits safe resends without invalidating an active link.
+    // Nullable only for tokens issued before the hardening migration.
+    tokenEncrypted: text("tokenEncrypted"),
+    expiresAt: timestamp("expiresAt", { mode: "date", precision: 3 }).notNull(),
+    requestedAt: timestamp("requestedAt", { mode: "date", precision: 3 }).notNull(),
+  },
+  (t) => [index("PendingRegistration_expiresAt_idx").on(t.expiresAt)],
+);
+
+export const registrationMailQuotas = pgTable(
+  "RegistrationMailQuota",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull(),
+    expiresAt: timestamp("expiresAt", { mode: "date", precision: 3 }).notNull(),
+  },
+  (t) => [index("RegistrationMailQuota_expiresAt_idx").on(t.expiresAt)],
+);
+
 export const sessions = pgTable(
   "Session",
   {

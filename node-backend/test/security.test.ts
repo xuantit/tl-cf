@@ -232,11 +232,11 @@ describe("kiểm soát truy cập admin", () => {
     expect(patch.status).toBe(403);
   });
 
-  it("không thể đăng ký khi không có invite code hợp lệ", async () => {
+  it("không thể tạo tài khoản chỉ bằng mã mời khi chưa xác minh email", async () => {
     const res = await request(app)
-      .post("/api/auth/register")
+      .post("/api/auth/verify-email")
       .send({ email: `no-invite-${suffix}@example.com`, password, inviteCode: "invalid-code" });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
   });
 
   it("/api/auth/setup không tạo được admin khi đã có user", async () => {

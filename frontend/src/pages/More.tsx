@@ -49,12 +49,12 @@ export default function More() {
       <MoreRow to="/analytics" icon="◱" label="Analytics" />
       <MoreRow to="/workers" icon="ƒ" label={t('Workers & Pages')} />
       <MoreRow to="/tunnels" icon="⇌" label="Tunnels" />
+      <MoreRow to="/turnstile" icon="◈" label="Turnstile" />
 
       {isAdmin && (
         <>
           <SectionHeader title={t('Administration')} />
           <MoreRow to="/users" icon="◉" label={t('Users')} />
-          <MoreRow to="/invites" icon="✉" label={t('Invite codes')} />
           <MoreRow to="/audit" icon="✎" label={t('Audit log')} />
         </>
       )}

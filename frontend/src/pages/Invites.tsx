@@ -250,6 +250,9 @@ export default function Invites() {
           </>
         }
       />
+      <Banner tone="info" className="mb-3">
+        {t('Invite codes are temporarily unused. New users register by verifying their email.')}
+      </Banner>
       {isError && (
         <Banner
           tone="err"
@@ -276,7 +279,7 @@ export default function Invites() {
             <EmptyState
               icon="✉"
               title={t('No invite codes')}
-              desc={t('Users need an invite code to register. Send the code or the registration link to the invitee.')}
+              desc={t('Invite codes are temporarily unused. New users register by verifying their email.')}
               actions={
                 <Button type="primary" size="small" onClick={() => setAddOpen(true)}>
                   + {t('Create invite code')}

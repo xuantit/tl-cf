@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import axios, { AxiosError, AxiosInstance } from "axios";
+import { publicTurnstileWidget, turnstileAccountId, turnstileSitekey, type RawTurnstileWidget, type TurnstileInput } from "../models/turnstile.js";
 
 export interface CloudflareApiIssue {
   code?: number;
@@ -1294,6 +1295,76 @@ class CloudflareService {
     if (!response.data.success) {
       throw this.createCloudflareApiError(response.data, "Failed to delete access rule");
     }
+  }
+
+  // ---- Turnstile management (not the public Siteverify API) ----
+  private async turnstileRequest<T>(
+    credentials: CloudflareCredentials, accountId: string,
+    method: 'get' | 'post' | 'put' | 'delete',
+    sitekey?: string, operation?: 'rotate_secret',
+    data?: unknown, params?: Record<string, unknown>,
+  ) {
+    turnstileAccountId.parse(accountId);
+    if (sitekey !== undefined) turnstileSitekey.parse(sitekey);
+    const url = `/accounts/${accountId}/challenges/widgets${sitekey ? `/${sitekey}` : ''}${operation ? `/${operation}` : ''}`;
+    try {
+      const response = await this.createClient(credentials).request<{
+        success: boolean; result: T; result_info?: { total_count?: number; page?: number; per_page?: number };
+      }>({ method, url, data, params, timeout: 20000 });
+      if (!response.data.success) throw this.createCloudflareApiError(response.data, 'Cloudflare Turnstile request failed', 400);
+      return response.data;
+    } catch (error) {
+      throw this.toCloudflareError(error, 'Cloudflare Turnstile request failed');
+    }
+  }
+
+  async listTurnstileWidgets(credentials: CloudflareCredentials, accountId: string, page = 1, perPage = 20) {
+    const response = await this.turnstileRequest<RawTurnstileWidget[]>(credentials, accountId, 'get', undefined, undefined,
+      undefined, { page, per_page: perPage, order: 'name', direction: 'asc' });
+    const widgets = (response.result ?? []).map(publicTurnstileWidget);
+    // If upstream omits totals, keep the current page reachable and allow trying
+    // one more page after a full page instead of treating this page as the total.
+    const inferredTotal = (page - 1) * perPage + widgets.length + (widgets.length === perPage ? 1 : 0);
+    return { widgets, total: response.result_info?.total_count ?? inferredTotal, page, perPage };
+  }
+
+  async getTurnstileWidget(credentials: CloudflareCredentials, accountId: string, sitekey: string) {
+    return publicTurnstileWidget((await this.turnstileRequest<RawTurnstileWidget>(credentials, accountId, 'get', sitekey)).result);
+  }
+
+  async createTurnstileWidget(credentials: CloudflareCredentials, accountId: string, input: TurnstileInput) {
+    const response = await this.turnstileRequest<RawTurnstileWidget>(credentials, accountId, 'post', undefined, undefined, {
+      name: input.name, domains: input.domains, mode: input.mode, clearance_level: input.clearanceLevel,
+    });
+    return publicTurnstileWidget(response.result);
+  }
+
+  async updateTurnstileWidget(credentials: CloudflareCredentials, accountId: string, sitekey: string, input: TurnstileInput) {
+    // Preserve Enterprise settings not exposed by the editor; never copy secret
+    // or server-managed fields into the Cloudflare PUT body.
+    const current = await this.getTurnstileWidget(credentials, accountId, sitekey);
+    const response = await this.turnstileRequest<RawTurnstileWidget>(credentials, accountId, 'put', sitekey, undefined, {
+      name: input.name, domains: input.domains, mode: input.mode, clearance_level: input.clearanceLevel,
+      bot_fight_mode: current.botFightMode, ephemeral_id: current.ephemeralId, offlabel: current.offlabel,
+    });
+    return publicTurnstileWidget(response.result);
+  }
+
+  async deleteTurnstileWidget(credentials: CloudflareCredentials, accountId: string, sitekey: string) {
+    await this.turnstileRequest(credentials, accountId, 'delete', sitekey);
+  }
+
+  async revealTurnstileSecret(credentials: CloudflareCredentials, accountId: string, sitekey: string) {
+    const result = (await this.turnstileRequest<RawTurnstileWidget>(credentials, accountId, 'get', sitekey)).result;
+    if (!result.secret) throw new Error('Cloudflare did not return a Turnstile secret');
+    return { secret: result.secret };
+  }
+
+  async rotateTurnstileSecret(credentials: CloudflareCredentials, accountId: string, sitekey: string, invalidateImmediately: boolean) {
+    const result = (await this.turnstileRequest<RawTurnstileWidget>(credentials, accountId, 'post', sitekey,
+      'rotate_secret', { invalidate_immediately: invalidateImmediately })).result;
+    if (!result.secret) throw new Error('Cloudflare did not return a Turnstile secret');
+    return { secret: result.secret };
   }
 
   // ---- Cloudflare Tunnel (account-scoped, remotely-managed) ----

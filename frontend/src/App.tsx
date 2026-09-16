@@ -14,6 +14,7 @@ const Analytics = lazy(() => import('./pages/Analytics'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Templates = lazy(() => import('./pages/Templates'))
 const Tunnels = lazy(() => import('./pages/Tunnels'))
+const Turnstile = lazy(() => import('./pages/Turnstile'))
 const WorkersPages = lazy(() => import('./pages/WorkersPages'))
 const History = lazy(() => import('./pages/History'))
 const Invites = lazy(() => import('./pages/Invites'))
@@ -22,6 +23,7 @@ const AuditLogPage = lazy(() => import('./pages/AuditLog'))
 const More = lazy(() => import('./pages/More'))
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
 
 // Redirect legacy paths to their new location while preserving query params.
 function RedirectWithQuery({ to, extraParams }: { to: string; extraParams?: Record<string, string> }) {
@@ -60,6 +62,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/" element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
           <Route element={<AppShell />}>
             <Route index element={<Domains />} />
@@ -76,6 +79,7 @@ function App() {
             <Route path="templates" element={<Templates />} />
             <Route path="workers" element={<WorkersPages />} />
             <Route path="tunnels" element={<Tunnels />} />
+            <Route path="turnstile" element={<Turnstile />} />
             <Route path="history" element={<History />} />
             <Route path="jobs" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'jobs' }} />} />
             <Route path="changes" element={<RedirectWithQuery to="/history" extraParams={{ tab: 'changes' }} />} />

@@ -20,10 +20,11 @@ export const NAV_ITEMS: NavEntry[] = [
   { path: '/analytics', icon: '◱', label: 'Analytics' },
   { path: '/workers', icon: 'ƒ', label: 'Workers & Pages' },
   { path: '/tunnels', icon: '⇌', label: 'Tunnels' },
+  { path: '/turnstile', icon: '◈', label: 'Turnstile' },
   { path: '/accounts', icon: '⌂', label: 'Accounts', section: 'account' },
   { path: '/settings', icon: '⚙', label: 'Settings', section: 'account' },
   { path: '/users', icon: '◉', label: 'Users', adminOnly: true },
-  { path: '/invites', icon: '✉', label: 'Invite codes', adminOnly: true },
+  // Invite administration is retained at /invites, but email signup no longer uses it.
   { path: '/audit', icon: '✎', label: 'Audit log', adminOnly: true },
 ]
 

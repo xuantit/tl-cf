@@ -184,7 +184,7 @@ export default function AppShell() {
       icon: '⋯',
       label: t('More'),
       to: '/more',
-      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/analytics', '/overview', '/workers', '/tunnels'].some(
+      active: ['/more', '/accounts', '/templates', '/users', '/invites', '/audit', '/settings', '/tags', '/analytics', '/overview', '/workers', '/tunnels', '/turnstile'].some(
         (p) => isNavActive(p, location.pathname),
       ),
     },

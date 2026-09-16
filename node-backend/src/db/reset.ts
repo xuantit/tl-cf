@@ -17,6 +17,8 @@ const TABLES = [
   "BulkJob",
   "AuditLog",
   "InviteCode",
+  "PendingRegistration",
+  "RegistrationMailQuota",
   "DnsTemplate",
   "TagRule",
   "Tag",

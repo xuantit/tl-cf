@@ -22,6 +22,7 @@ import { rulesRouter } from "./routes/rules.js";
 import { tagsRouter } from "./routes/tags.js";
 import { templatesRouter } from "./routes/templates.js";
 import { tunnelsRouter } from "./routes/tunnels.js";
+import { turnstileRouter } from "./routes/turnstile.js";
 import { usersRouter } from "./routes/users.js";
 import { workersRouter } from "./routes/workers.js";
 
@@ -46,10 +47,22 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "1mb" }));
+// Parser errors can contain raw request fragments/passwords; never log or echo them.
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const parserError = error as { type?: string; status?: number };
+  if (parserError.type && [400, 413, 415].includes(parserError.status ?? 0)) {
+    return res.status(parserError.status!).json({
+      detail: parserError.status === 413 ? "Request body too large" : "Invalid JSON request body",
+    });
+  }
+  next(error);
+});
 
 // Morgan logging với Winston
+morgan.token("safe-url", (req) => (req.url || "").split("?")[0]);
 app.use(
-  morgan("combined", {
+  // Never retain query credentials, or a Referer copied from a verification URL.
+  morgan(':remote-addr :method :safe-url :status :res[content-length] :response-time ms', {
     stream: {
       write: (message: string) => {
         logger.info(message.trim());
@@ -80,6 +93,7 @@ app.use("/api/rules", rulesRouter);
 app.use("/api/tags", tagsRouter);
 app.use("/api/templates", templatesRouter);
 app.use("/api/tunnels", cloudflareLimiter, tunnelsRouter);
+app.use("/api/turnstile", cloudflareLimiter, turnstileRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/workers", cloudflareLimiter, workersRouter);
 app.use("/api", domainsConfigRouter);

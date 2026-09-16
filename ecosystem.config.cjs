@@ -25,6 +25,12 @@ module.exports = {
       max_memory_restart: "1G",
       env: {
         NODE_ENV: "production",
+        HOST: "127.0.0.1",
+        APP_URL: "https://cf.mmthui.xyz",
+        CORS_ORIGINS: "https://cf.mmthui.xyz",
+        AUTO_SEED_DEFAULT_ADMIN: "false",
+        RATE_LIMIT_DISABLED: "false",
+        TRUST_PROXY_HOPS: "1",
         // PORT and all secrets are read from node-backend/.env via dotenv.
       },
     },

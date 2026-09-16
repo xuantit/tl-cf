@@ -100,7 +100,7 @@ export default function Login() {
           </Form.Item>
         </Form>
         <div className="mt-4 flex items-center gap-2 font-mono text-[11px] text-fg-3">
-          <span>{t('An invite code is needed to register')}</span>
+          <span>{t("Don't have an account?")}</span>
           <Link to="/register" className="ml-auto text-accent no-underline hover:text-accent-hover">
             {t('Sign up')} →
           </Link>

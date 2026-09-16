@@ -55,6 +55,13 @@ export const authLimiter = build({
   detail: "Quá nhiều lần thử. Vui lòng đợi 15 phút rồi thử lại.",
 });
 
+/** Count successful sends too: otherwise an attacker can exhaust the email quota. */
+export const registrationEmailLimiter = build({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  detail: "Quá nhiều yêu cầu gửi email. Vui lòng đợi 15 phút rồi thử lại.",
+});
+
 /** Đổi mật khẩu: chặn dò mật khẩu hiện tại bằng token bị đánh cắp. */
 export const sensitiveLimiter = build({
   windowMs: 15 * 60 * 1000,

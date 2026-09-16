@@ -12,6 +12,8 @@ import { db, pool } from "../services/db.js";
 
 const EXPECTED_TABLES = [
   "User",
+  "PendingRegistration",
+  "RegistrationMailQuota",
   "Session",
   "CloudflareAccount",
   "Domain",

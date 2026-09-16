@@ -45,6 +45,9 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
   }
 
   res.on("finish", () => {
+    // Rejected floods must not turn into unlimited database writes. Rate limiter
+    // already logs the rejection (production should aggregate/sample those logs).
+    if (res.statusCode === 429) return;
     let metaJson: string | undefined;
     try {
       if (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0) {

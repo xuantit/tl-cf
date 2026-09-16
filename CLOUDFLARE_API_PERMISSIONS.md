@@ -100,6 +100,26 @@
 - Token tunnel là bí mật (ai có token là chạy được connector) — tool chỉ hiển thị khi bấm Reveal và ghi audit log, không bao giờ ghi token vào log.
 - Tunnel tạo qua tool là remotely-managed (`config_src: cloudflare`) — cấu hình ingress quản lý từ dashboard/tool, không cần file config.yml phía connector.
 
+### 9. **Turnstile (trang Turnstile)**
+
+**Endpoints:** `GET/POST /accounts/{account_id}/challenges/widgets`, `GET/PUT/DELETE .../{sitekey}`, `POST .../{sitekey}/rotate_secret`.
+
+**Quyền tối thiểu:**
+- Xem danh sách/chi tiết/secret: **Account → Turnstile Sites → Read** (API: `Turnstile Sites Read`).
+- Tạo/sửa/xóa/xoay secret: **Account → Turnstile Sites → Edit/Write** (API: `Turnstile Sites Write`).
+- **Account → Account Settings → Read** cho danh sách account tự động; nếu không cấp quyền này, nhập **Cloudflare Account ID** trực tiếp trong trang Turnstile.
+- Scope token đến đúng account sở hữu widget. API cũng chấp nhận Account Settings Read/Write tương ứng, nhưng nên chọn quyền Turnstile tối thiểu.
+
+**Lưu ý:**
+- Account switcher của CF Tool chọn **credential đã lưu**; dropdown/ô Account ID trong trang Turnstile chọn **account thật bên Cloudflare**. Không mặc định lấy account đầu tiên khi token truy cập nhiều account.
+- API trả secret trong chi tiết/tạo/sửa nhưng tool loại bỏ secret khỏi các response thông thường. Chỉ `POST .../secret/reveal` hoặc `.../secret/rotate` trả secret, với `Cache-Control: no-store` và audit.
+- Secret không được lưu trong DB, change history hay React Query cache. Panel đóng/đổi account/widget sẽ bỏ secret khỏi giao diện.
+- Xoay secret mặc định giữ khóa cũ 2 giờ; Cloudflare không cho xoay tiếp trong thời gian chuyển đổi. Chọn vô hiệu ngay chỉ khi đã chuẩn bị cập nhật mọi backend dùng widget.
+- Không tự gắn widget vào form đăng ký CF Tool; vẫn cần nhúng frontend + Siteverify backend riêng.
+- Editor cơ bản hỗ trợ 1–10 hostname/IP, 3 mode và pre-clearance. Giữ nguyên các cờ Enterprise khi sửa; cấu hình nâng cao/analytics dùng liên kết Cloudflare dashboard.
+
+Tài liệu: [Cloudflare Turnstile API](https://developers.cloudflare.com/turnstile/get-started/widget-management/api/).
+
 ## Checklist quyền đầy đủ
 
 Để tool hoạt động đầy đủ, API Token cần có:
@@ -110,6 +130,7 @@
 - ✅ Account → Workers Scripts → Edit (trang Workers)
 - ✅ Account → Cloudflare Pages → Edit (trang Pages)
 - ✅ Account → Cloudflare Tunnel → Edit (trang Tunnels)
+- ✅ Account → Turnstile Sites → Edit (trang Turnstile; Read nếu chỉ xem)
 
 ### Zone Level:
 - ✅ Zone → Zone → Edit (cho zone creation và general operations)

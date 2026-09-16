@@ -1,57 +1,60 @@
-import { useState } from 'react'
-import { useNavigate, Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Form, Input, Button, Alert } from 'antd'
-import { message } from '../lib/antdApp'
 import { useTranslation } from 'react-i18next'
-import { api } from '../services/api'
-import { StrengthMeter, Tag } from '../components/ui'
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="font-mono text-[11px] uppercase tracking-[.09em] text-fg-3">{children}</span>
-  )
-}
+import { api, apiErrorDetail } from '../services/api'
+import AuthCard from '../components/AuthCard'
+import TurnstileChallenge from '../components/TurnstileChallenge'
 
 export default function Register() {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
+  const submitting = useRef(false)
   const [err, setErr] = useState('')
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const [form] = Form.useForm<{ email: string; password: string; inviteCode: string }>()
-  const password = Form.useWatch('password', form) || ''
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  const [challengeGeneration, setChallengeGeneration] = useState(0)
+  const [sentEmail, setSentEmail] = useState('')
+  const [cooldown, setCooldown] = useState(0)
+  const coolingDown = cooldown > 0
+  const [form] = Form.useForm<{ email: string }>()
 
-  const onFinish = async (v: { email: string; password: string; inviteCode: string }) => {
+  useEffect(() => {
+    if (!coolingDown) return
+    const timer = setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000)
+    return () => clearInterval(timer)
+  }, [coolingDown])
+
+  const onFinish = async ({ email }: { email: string }) => {
+    if (submitting.current) return
+    if (turnstileToken === null) { setErr(t('Please complete anti-bot verification')); return }
+    submitting.current = true
     setLoading(true)
     setErr('')
     try {
-      await api.post('/auth/register', v)
-      message.success(t('Registration successful! Please sign in.'))
-      setTimeout(() => navigate('/login'), 1200)
+      const normalizedEmail = email.trim().toLowerCase()
+      const { data } = await api.post<{ retryAfter: number }>('/auth/register', {
+        email: normalizedEmail, ...(turnstileToken ? { turnstileToken } : {}),
+      })
+      setSentEmail(normalizedEmail)
+      setCooldown(data.retryAfter || 60)
     } catch (e: unknown) {
-      setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('Registration failed'))
+      setErr(apiErrorDetail(e) || t('Registration failed'))
     } finally {
+      setTurnstileToken(null)
+      setChallengeGeneration((value) => value + 1)
+      submitting.current = false
       setLoading(false)
     }
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-bg-app p-5">
-      <div className="fade-in w-[352px] max-w-full rounded-xl border border-solid border-stroke bg-bg p-[26px_24px] shadow-[0_8px_30px_-12px_rgb(0_0_0/.12)]">
-        <div className="mb-5 flex items-center gap-2">
-          <div className="grid h-6 w-6 flex-none place-items-center rounded-[6px] bg-accent text-[13px] text-white">
-            ☁
-          </div>
-          <div className="font-mono text-[13px] font-semibold text-fg">CF Tool</div>
-          <Tag className="ml-auto">v2</Tag>
-        </div>
-        <div className="text-[15px] font-semibold tracking-[-.02em] text-fg">{t('Sign up')}</div>
-        <div className="mt-[3px] mb-[18px] font-mono text-[11.5px] text-fg-3">
-          {t('An invite code from an admin is required')}
-        </div>
+    <AuthCard
+      title={t(sentEmail ? 'Check your email' : 'Sign up with email')}
+      description={t('No invite code needed. Verify your email, then choose a password to create your account.')}
+    >
         {err && (
           <Alert
-            message={err}
+            title={err}
             type="error"
             showIcon
             closable
@@ -59,63 +62,62 @@ export default function Register() {
             style={{ marginBottom: 14 }}
           />
         )}
+        <TurnstileChallenge action="register" generation={challengeGeneration} onToken={setTurnstileToken} />
+        {sentEmail ? (
+          <div className="space-y-4">
+            <Alert
+              type="success"
+              showIcon
+              title={t('Check your inbox and spam folder')}
+              description={t('If {{email}} is eligible and within sending limits, a verification email will arrive shortly. Links expire 30 minutes after the first request; resending does not extend them.', { email: sentEmail })}
+            />
+            <p className="text-[12px] leading-relaxed text-fg-3">{t('Already registered? Sign in instead. Your password will not be changed.')}</p>
+            <Button block loading={loading} disabled={coolingDown || turnstileToken === null} onClick={() => onFinish({ email: sentEmail })}>
+              {coolingDown ? t('Resend in {{seconds}}s', { seconds: cooldown }) : t('Resend verification email')}
+            </Button>
+            <Button type="text" block disabled={loading} onClick={() => { setSentEmail(''); setErr('') }}>
+              {t('Use a different email')}
+            </Button>
+          </div>
+        ) : (
         <Form
           form={form}
           onFinish={onFinish}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ inviteCode: searchParams.get('invite') || '' }}
         >
           <Form.Item
-            name="inviteCode"
-            label={<FieldLabel>{t('Invite code')}</FieldLabel>}
-            rules={[{ required: true, message: t('An invite code is required to sign up') }]}
-            style={{ marginBottom: 11 }}
-          >
-            <Input placeholder="CF-XXXXX-XXXXX" className="font-mono" />
-          </Form.Item>
-          <Form.Item
             name="email"
-            label={<FieldLabel>Email</FieldLabel>}
+            label="Email"
+            normalize={(value: string) => value.trim()}
             rules={[
               { required: true, type: 'email', message: t('Please enter a valid email') },
-              { min: 5, message: t('Email must be at least 5 characters') }
+              { max: 254 }
             ]}
             style={{ marginBottom: 11 }}
           >
-            <Input placeholder="your-email@example.com" className="font-mono" />
+            <Input type="email" autoComplete="email" placeholder="your-email@example.com" className="font-mono" />
           </Form.Item>
-          <Form.Item
-            name="password"
-            label={<FieldLabel>{t('Password')}</FieldLabel>}
-            rules={[
-              { required: true, message: t('Please enter your password') },
-              { min: 8, message: t('Password must be at least 8 characters') }
-            ]}
-            style={{ marginBottom: 0 }}
-          >
-            <Input.Password placeholder={t('At least 8 characters')} className="font-mono" />
-          </Form.Item>
-          <StrengthMeter password={password} />
           <Form.Item style={{ marginBottom: 0 }}>
             <Button
               type="primary"
               htmlType="submit"
               loading={loading}
+              disabled={turnstileToken === null}
               block
               style={{ height: 32, marginTop: 14 }}
             >
-              {t('Create Account')} →
+              {t('Send verification email')} →
             </Button>
           </Form.Item>
         </Form>
+        )}
         <div className="mt-4 flex items-center gap-2 font-mono text-[11px] text-fg-3">
           <span>{t('Already have an account?')}</span>
           <Link to="/login" className="ml-auto text-accent no-underline hover:text-accent-hover">
             {t('Sign in')} →
           </Link>
         </div>
-      </div>
-    </div>
+    </AuthCard>
   )
 }

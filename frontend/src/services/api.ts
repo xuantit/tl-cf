@@ -37,6 +37,7 @@ const ACCOUNT_SCOPED = [
   '/dashboard',
   '/tags',
   '/tunnels',
+  '/turnstile',
   '/workers',
   '/pages',
 ]
