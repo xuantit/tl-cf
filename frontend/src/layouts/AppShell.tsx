@@ -5,6 +5,7 @@ import {
   BulbFilled,
   BulbOutlined,
   LogoutOutlined,
+  SearchOutlined,
   TranslationOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -19,6 +20,7 @@ import { useFocusMode } from '../stores/useFocusMode'
 import AccountSwitcher from '../components/AccountSwitcher'
 import CommandPalette from '../components/CommandPalette'
 import NavMenuGroup from '../components/NavMenuGroup'
+import WorkspaceIntro from '../components/WorkspaceIntro'
 import { Kbd } from '../components/ui'
 import { NAV_ITEMS, isNavActive } from './nav'
 
@@ -38,7 +40,8 @@ function SideNavItem({
   return (
     <Link
       to={to}
-      className={`flex h-[32px] items-center gap-[9px] rounded-[6px] px-[9px] text-[14px] transition-colors ${
+      aria-current={active ? 'page' : undefined}
+      className={`console-nav-link flex h-[40px] items-center gap-[9px] rounded-[10px] px-[12px] text-[14px] transition-colors ${
         active
           ? 'bg-accent-soft font-medium !text-accent'
           : '!text-fg-2 hover:bg-bg-hover hover:!text-fg'
@@ -94,7 +97,7 @@ function MobileNavButton({
   )
 }
 
-/** Console-style app shell: 264px sidebar (desktop) + bottom nav (mobile) + ⌘K palette. */
+/** Persistent navigation and search; dense editors still use the existing focus-mode rail. */
 export default function AppShell() {
   const { t, i18n } = useTranslation()
   const location = useLocation()
@@ -192,42 +195,30 @@ export default function AppShell() {
   ]
 
   return (
-    <div className="flex h-dvh bg-bg">
+    <div className="console-shell flex h-dvh bg-bg-app">
+      <a className="console-skip-link" href="#workspace-main">{t('Skip to content')}</a>
       {/* Desktop sidebar (.side) — thu về w-0 khi focus mode để rail chức năng chiếm mép trái */}
       <aside
-        className={`hidden shrink-0 flex-col overflow-hidden border-stroke bg-bg-side py-[11px] transition-[width,padding] duration-200 lg:flex ${
+        aria-label={t('Main navigation')}
+        inert={focus}
+        className={`console-sidebar hidden shrink-0 flex-col overflow-hidden border-stroke bg-bg-side py-[11px] transition-[width,padding] duration-200 lg:flex ${
           focus ? 'w-0 border-r-0 px-0' : 'w-[264px] border-r px-[11px]'
         }`}
       >
         {/* Wrapper giữ bề rộng cố định để nội dung không bị bóp méo khi sidebar đóng, chỉ bị cắt */}
         <div className="flex h-full w-[242px] flex-col">
         {/* Brand */}
-        <Link to="/" className="flex items-center gap-[7px] px-[5px] pt-[3px] pb-[7px]">
-          <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-[5px] bg-accent text-[12px] text-white">
+        <Link to="/" className="console-brand">
+          <span className="console-brand-mark" aria-hidden="true">
             ☁
           </span>
-          <span className="font-mono text-[14px] font-semibold tracking-[-0.01em] !text-fg">CF Tool</span>
-          <span className="ml-auto font-mono text-[11px] text-fg-3">v2</span>
+          <span><strong>CF Tool</strong><small>{t('Cloud workspace')}</small></span>
         </Link>
 
-        {/* Compact account switcher */}
-        <div className="mb-[9px]">
-          <AccountSwitcher />
-        </div>
-
-        {/* Quick search (.qs) */}
-        <button
-          type="button"
-          onClick={() => openPalette(true)}
-          className="mb-[9px] flex h-[30px] w-full cursor-pointer items-center gap-1.5 rounded-[6px] border border-solid border-stroke bg-bg px-[9px] font-mono text-[12px] text-fg-3 transition-colors hover:border-fg-3"
-        >
-          <span>⌕</span>
-          <span>{t('Quick find')}</span>
-          <Kbd className="ml-auto">⌘K</Kbd>
-        </button>
+        <p className="console-nav-label">{t('Workspace')}</p>
 
         {/* Nav (.ni) */}
-        <nav className="flex flex-1 flex-col gap-[1px] overflow-y-auto">
+        <nav aria-label={t('Workspace navigation')} className="console-nav flex flex-1 flex-col gap-1 overflow-y-auto">
           {mainNav.map((item) => item.children ? (
             <NavMenuGroup key={item.path} item={item} />
           ) : (
@@ -270,7 +261,7 @@ export default function AppShell() {
         <Dropdown menu={{ items: userMenuItems, onClick: onUserMenuClick }} placement="topLeft" trigger={['click']}>
           <button
             type="button"
-            className="mt-auto flex w-full cursor-pointer items-center gap-[7px] border-x-0 border-t border-b-0 border-solid border-stroke bg-transparent px-[5px] pt-[7px] pb-[2px] text-left"
+            className="console-user mt-auto flex w-full cursor-pointer items-center gap-[9px] border-x-0 border-t border-b-0 border-solid border-stroke bg-transparent px-[5px] pt-[14px] pb-[8px] text-left"
           >
             <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-[4px] bg-fg font-mono text-[10px] font-semibold text-bg">
               {initials}
@@ -282,18 +273,28 @@ export default function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar (.mstat) */}
-        <header className="flex items-center justify-center border-b border-stroke px-[14px] pt-[6px] pb-[4px] font-mono text-[11.5px] text-fg-2 lg:hidden">
-          CF Tool
+        <header className="console-topbar">
+          <Link to="/" className={`console-mobile-brand ${focus ? '' : 'lg:hidden'}`}>☁ <span>CF Tool</span></Link>
+          <button type="button" onClick={() => openPalette(true)} className="console-search" aria-label={t('Quick find')}>
+            <SearchOutlined aria-hidden="true" />
+            <span>{t('Search domains, tools, actions…')}</span>
+            <Kbd className="ml-auto">Ctrl K</Kbd>
+          </button>
+          <div className="console-account"><AccountSwitcher /></div>
+          <button type="button" className="console-theme-toggle" onClick={toggleTheme}
+            aria-label={dark ? t('Light mode') : t('Dark mode')} title={dark ? t('Light mode') : t('Dark mode')}>
+            {dark ? <BulbFilled /> : <BulbOutlined />}
+          </button>
         </header>
 
         {/* Main content — full-width console style */}
-        <main className="min-w-0 flex-1 overflow-auto bg-bg">
+        <main id="workspace-main" tabIndex={-1} className="workspace-content min-w-0 flex-1 overflow-auto">
+          {location.pathname === '/' && <WorkspaceIntro />}
           <Outlet />
         </main>
 
         {/* Mobile bottom nav (.mnav) */}
-        <nav className="grid grid-cols-4 border-t border-stroke bg-bg pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <nav aria-label={t('Mobile navigation')} className="console-mobile-nav grid grid-cols-4 border-t border-stroke bg-bg pb-[env(safe-area-inset-bottom)] lg:hidden">
           {mobileTabs.map((tab) => (
             <MobileNavButton
               key={tab.key}

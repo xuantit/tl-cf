@@ -33,11 +33,11 @@ export default function PageHeader({
   return (
     <div className="page-header">
       <div className="flex flex-wrap items-center gap-[9px]">
-        <h1 className="text-[16.5px] font-semibold tracking-[-0.02em] text-fg">{title}</h1>
+        <h1 className="text-[clamp(21px,2vw,27px)] font-semibold tracking-[-0.035em] text-fg">{title}</h1>
         {crumb && <span className="font-mono text-[11px] text-fg-3">{crumb}</span>}
         {actions && <div className="ml-auto flex flex-wrap gap-1.5">{actions}</div>}
       </div>
-      {description && <p className="mt-1 mb-0 text-[12px] text-fg-2">{description}</p>}
+      {description && <p className="mt-1.5 mb-0 text-[13px] text-fg-2">{description}</p>}
       {tabs && (
         <div className="mt-[9px] flex gap-4 overflow-x-auto border-b border-stroke [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab) => {

@@ -1,15 +1,10 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Select, Space, Table, Typography } from 'antd'
-import { message } from '../../lib/antdApp'
+import { useMutation } from '@tanstack/react-query'
+import { Modal, Input, Typography, Space, Alert, Button, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api, apiErrorDetail } from '../../services/api'
-import { useAccountStore } from '../../stores/useAccountStore'
-import type { CfAccount } from '../AccountSwitcher'
-import type { Zone } from '../../types/domain'
 import type { BulkJob } from '../../hooks/useJobPolling'
-import { DetailPanel, Tag } from '../ui'
 
 const { Text } = Typography
 
@@ -22,56 +17,25 @@ interface CreatedZoneResult {
   status: string
 }
 
-// create-zones results carry { name, zoneId, nameServers, status }; clone-domain results carry
-// { zoneId, nameservers, steps } with the new domain name as the item key. Normalize both.
-function toZoneResult(item: BulkJob['items'][number]): CreatedZoneResult | null {
-  if (item.status !== 'success' || !item.result) return null
-  const r = item.result as Partial<CreatedZoneResult> & { nameservers?: string[] }
-  return {
-    name: r.name || item.label || item.key,
-    zoneId: r.zoneId || item.key,
-    nameServers: r.nameServers || r.nameservers || [],
-    status: r.status || 'pending',
-  }
-}
-
-interface BulkAddDomainsPanelProps {
+interface BulkAddDomainsModalProps {
   open: boolean
   onClose: () => void
   onJobCreated: (jobId: string) => void
 }
 
-type LineStatus = 'valid' | 'invalid' | 'exists' | 'duplicate'
-
-interface ParsedLine {
-  raw: string
-  name: string
-  status: LineStatus
-}
-
-function parseLines(raw: string, existingNames: Set<string>): ParsedLine[] {
-  const seen = new Set<string>()
-  return raw
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const name = line.toLowerCase()
-      let status: LineStatus
-      if (!DOMAIN_REGEX.test(name)) status = 'invalid'
-      else if (existingNames.has(name)) status = 'exists'
-      else if (seen.has(name)) status = 'duplicate'
-      else status = 'valid'
-      seen.add(name)
-      return { raw: line, name, status }
-    })
+function parseDomains(raw: string): { valid: string[]; invalid: string[] } {
+  const lines = [...new Set(raw.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean))]
+  return {
+    valid: lines.filter((l) => DOMAIN_REGEX.test(l)),
+    invalid: lines.filter((l) => !DOMAIN_REGEX.test(l)),
+  }
 }
 
 function exportCsv(job: BulkJob) {
   const rows = [['name', 'zone_id', 'ns1', 'ns2', 'status']]
   for (const item of job.items) {
-    const r = toZoneResult(item)
-    if (r) {
+    if (item.status === 'success' && item.result) {
+      const r = item.result as CreatedZoneResult
       rows.push([r.name, r.zoneId, r.nameServers[0] || '', r.nameServers[1] || '', r.status])
     } else {
       rows.push([item.key, '', '', '', `error: ${item.error || 'unknown'}`])
@@ -99,7 +63,7 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
       render: (ns: string[]) => (
         <Space orientation="vertical" size={0}>
           {ns.map((n) => (
-            <Text key={n} copyable>
+            <Text key={n} copyable style={{ fontFamily: 'monospace' }}>
               {n}
             </Text>
           ))}
@@ -109,8 +73,8 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
     { title: t('Status'), dataIndex: 'status', key: 'status', width: 100 },
   ]
   const results = job.items
-    .map((i) => toZoneResult(i))
-    .filter((r): r is CreatedZoneResult => r !== null)
+    .filter((i) => i.status === 'success' && i.result)
+    .map((i) => i.result as CreatedZoneResult)
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       {results.length > 0 && (
@@ -135,44 +99,11 @@ export function CreateZonesDone({ job }: { job: BulkJob }) {
   )
 }
 
-const LINE_TAG: Record<Exclude<LineStatus, 'valid'>, { variant: 'err' | 'warn'; label: string }> = {
-  invalid: { variant: 'err', label: 'invalid' },
-  exists: { variant: 'err', label: 'already exists' },
-  duplicate: { variant: 'warn', label: 'duplicate' },
-}
-
-const MAX_RENDERED_LINES = 200
-
-/** Bulk zone creation styled after the 2.html bulkadd overlay — push-style DetailPanel. */
-export default function BulkAddDomainsPanel({ open, onClose, onJobCreated }: BulkAddDomainsPanelProps) {
+export default function BulkAddDomainsModal({ open, onClose, onJobCreated }: BulkAddDomainsModalProps) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
   const [raw, setRaw] = useState('')
 
-  const activeAccountId = useAccountStore((s) => s.activeAccountId)
-  const setActiveAccountId = useAccountStore((s) => s.setActiveAccountId)
-  const { data: accounts = [] } = useQuery<CfAccount[]>({
-    queryKey: ['cf-accounts'],
-    queryFn: async () => (await api.get('/cf/accounts')).data,
-    staleTime: 60_000,
-    enabled: open,
-  })
-
-  // Existing zone names (shared ['domains'] cache) power the "already exists" per-line check.
-  const { data: zones = [] } = useQuery<Zone[]>({
-    queryKey: ['domains'],
-    queryFn: async () => (await api.get('/domains')).data,
-    staleTime: 60_000,
-    enabled: open,
-  })
-  const existingNames = useMemo(() => new Set(zones.map((z) => z.name.toLowerCase())), [zones])
-
-  const lines = useMemo(() => parseLines(raw, existingNames), [raw, existingNames])
-  const validNames = useMemo(
-    () => [...new Set(lines.filter((l) => l.status === 'valid').map((l) => l.name))],
-    [lines],
-  )
-  const errorCount = lines.filter((l) => l.status === 'invalid' || l.status === 'exists').length
+  const { valid, invalid } = useMemo(() => parseDomains(raw), [raw])
 
   const createMutation = useMutation({
     mutationFn: async (names: string[]) =>
@@ -181,7 +112,7 @@ export default function BulkAddDomainsPanel({ open, onClose, onJobCreated }: Bul
       setRaw('')
       onJobCreated(data.jobId)
     },
-    onError: (error) => message.error(apiErrorDetail(error) || t('Could not create domains in bulk')),
+    onError: (error: unknown) => message.error(apiErrorDetail(error) || t('Could not create domains in bulk')),
   })
 
   const handleClose = () => {
@@ -189,93 +120,40 @@ export default function BulkAddDomainsPanel({ open, onClose, onJobCreated }: Bul
     onClose()
   }
 
-  const changeAccount = (id: string) => {
-    setActiveAccountId(id)
-    // Everything scoped to the active account must refetch (same as AccountSwitcher).
-    queryClient.invalidateQueries()
-  }
-
   return (
-    <DetailPanel
-      open={open}
+    <Modal
       title={t('Bulk add domains')}
-      onClose={handleClose}
-      footer={
-        <div className="flex w-full flex-wrap items-center gap-[7px]">
-          <span className="font-mono text-[11.5px] text-fg-3">
-            {t('will create {{count}} zones', { count: validNames.length })}
-          </span>
-          <span className="ml-auto flex gap-2">
-            <Button onClick={handleClose}>{t('Cancel')}</Button>
-            <Button
-              type="primary"
-              disabled={validNames.length === 0}
-              loading={createMutation.isPending}
-              onClick={() => createMutation.mutate(validNames)}
-            >
-              {t('Create {{count}} domains', { count: validNames.length })}
-            </Button>
-          </span>
-        </div>
-      }
+      open={open}
+      onCancel={handleClose}
+      onOk={() => createMutation.mutate(valid)}
+      okText={t('Create {{count}} domains', { count: valid.length })}
+      cancelText={t('Cancel')}
+      okButtonProps={{ disabled: valid.length === 0, loading: createMutation.isPending }}
+      width={640}
     >
-      <p className="mt-0 mb-3 font-mono text-[11.5px] text-fg-3">{t('One domain per line · max 500')}</p>
-      <div className="mb-3">
-        <label className="mb-1.5 block font-mono text-[11px] tracking-[.08em] text-fg-3 uppercase">
-          {t('Cloudflare account')}
-        </label>
-        <Select
-          style={{ width: '100%' }}
-          value={activeAccountId ?? undefined}
-          onChange={changeAccount}
-          placeholder={t('Select account')}
-          options={accounts.map((a) => ({ value: a.id, label: a.label || a.email || a.id.slice(0, 8) }))}
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+        <Text type="secondary">{t('Paste a list of domains, one per line (max 500).')}</Text>
+        <Input.TextArea
+          rows={10}
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder={'example.com\nexample.net\nexample.org'}
         />
-      </div>
-
-      <label className="mb-1.5 block font-mono text-[11px] tracking-[.08em] text-fg-3 uppercase">
-        {t('Domain list')}
-      </label>
-      <Input.TextArea
-        rows={7}
-        value={raw}
-        onChange={(e) => setRaw(e.target.value)}
-        placeholder={'example.com\nexample.net\nexample.org'}
-        className="font-mono"
-      />
-      {lines.length > 0 && (
-          <div className="mt-1.5 font-mono text-[11.5px] text-fg-3">
-          {t('{{count}} lines', { count: lines.length })} ·{' '}
-          <span className="text-ok">{t('{{count}} valid', { count: validNames.length })}</span>
-          {errorCount > 0 && (
-            <>
-              {' '}
-              · <span className="text-danger">{t('{{count}} errors', { count: errorCount })}</span>
-            </>
-          )}
-        </div>
-      )}
-      {lines.some((l) => l.status !== 'valid') && (
-        <div className="mt-2 max-h-[132px] overflow-y-auto rounded-[6px] border border-solid border-stroke">
-          {lines.slice(0, MAX_RENDERED_LINES).map(
-            (line, i) =>
-              line.status !== 'valid' && (
-                <div
-                  key={`${line.raw}-${i}`}
-                  className="flex items-center gap-1.5 border-0 border-b border-solid border-stroke-2 px-[9px] py-[5px] font-mono text-[11.5px] text-danger last:border-b-0"
-                >
-                  <span className="min-w-0 truncate">{line.raw}</span>
-                  <Tag variant={LINE_TAG[line.status].variant}>{t(LINE_TAG[line.status].label)}</Tag>
-                </div>
-              ),
-          )}
-          {lines.length > MAX_RENDERED_LINES && (
-            <div className="px-[9px] py-[5px] font-mono text-[11px] text-fg-3">
-              {t('+{{count}} more', { count: lines.length - MAX_RENDERED_LINES })}
-            </div>
-          )}
-        </div>
-      )}
-    </DetailPanel>
+        <Space>
+          <Text>
+            {t('Valid')}: <Text strong>{valid.length}</Text>
+          </Text>
+          {invalid.length > 0 && <Text type="danger">{t('Invalid: {{count}}', { count: invalid.length })}</Text>}
+        </Space>
+        {invalid.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t('Invalid lines will be skipped')}
+            description={invalid.slice(0, 10).join(', ') + (invalid.length > 10 ? '…' : '')}
+          />
+        )}
+      </Space>
+    </Modal>
   )
 }

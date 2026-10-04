@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { isIP } from "node:net";
 import { z } from "zod";
 
 import { requireAuth, type AuthUser } from "../middleware/auth.js";
@@ -7,12 +8,7 @@ import { createJob } from "../services/jobRunner.js";
 import { getCredentials } from "./cf.js";
 import { configService } from "../services/configService.js";
 import { createChangeSet, recordChangeSafe, type ChangeItemPayload } from "../services/changes.js";
-import {
-  applyZoneConfig,
-  collectZoneConfig,
-  summarizeApplySteps,
-  type ZoneConfigComponent,
-} from "../services/zoneConfig.js";
+import { collectZoneConfig, applyZoneConfig, summarizeApplySteps, type ApplyStepResult } from "../services/zoneConfig.js";
 import { db } from "../services/db.js";
 import { tagRules as tagRulesTable } from "../db/schema.js";
 import { and, eq } from "drizzle-orm";
@@ -136,19 +132,16 @@ domainsRouter.get("/", async (req, res) => {
       }
     }
 
-    // Auto-tag on read: merge enabled TagRule matches into each zone's tags.
-    // Never persisted — rules are re-evaluated on every request.
+    // Merge enabled rules for this user on read; never persist derived tags.
     try {
       const tagRules = await db.query.tagRules.findMany({
         where: and(eq(tagRulesTable.userId, auth.userId), eq(tagRulesTable.enabled, true)),
       });
-      if (tagRules.length > 0) {
-        for (const zone of zones) {
-          const matched = matchTagRules(tagRules, zone);
-          if (matched.length > 0) {
-            const saved: string[] = (zone as any).tags ?? [];
-            (zone as any).tags = [...new Set([...saved, ...matched])];
-          }
+      for (const zone of zones) {
+        const matched = matchTagRules(tagRules, zone);
+        if (matched.length > 0) {
+          const saved: string[] = (zone as any).tags ?? [];
+          (zone as any).tags = [...new Set([...saved, ...matched])];
         }
       }
     } catch (error: any) {
@@ -491,191 +484,181 @@ domainsRouter.post("/bulk-dns/replace", async (req, res) => {
   }
 });
 
-// ---- Copy config / clone domain (static paths — must stay before "/:zoneId" routes) ----
+// Copy/clone accepts only the established component allowlist and safe path segments.
+const configZoneIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+const configHostnameSchema = z.string().trim().toLowerCase().min(1).max(253).refine((name) =>
+  DOMAIN_NAME_REGEX.test(name) && isIP(name) === 0 && name.split(".").every((label) =>
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)), "Invalid domain name");
+const configScopeSchema = z.object({
+  accountId: z.string().trim().min(1).max(256).optional(),
+  label: z.string().trim().min(1).max(256).optional(),
+});
+const configRequestFields = {
+  sourceZoneId: configZoneIdSchema,
+  sourceZoneName: configHostnameSchema,
+  components: z.array(z.enum(["dns", "settings", "rules", "securityRules", "pageRules"])).min(1).max(5)
+    .transform((items) => [...new Set(items)]),
+  dnsMode: z.enum(["skip", "overwrite"]).default("skip"),
+};
 
-const zoneConfigComponentSchema = z.enum(["dns", "settings", "rules", "securityRules", "pageRules"]);
-const dnsModeSchema = z.enum(["skip", "overwrite"]).default("skip");
+class ZoneConfigRequestError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
 
-// Copy a config snapshot from one zone onto one or more target zones (background bulk job)
+async function resolveConfigScope(userId: string, query: unknown) {
+  const scope = configScopeSchema.parse(query);
+  // Resolve the exact saved account once, including token-only and label/default scopes.
+  // Never fall back to another tenant/account when an explicit selection is invalid.
+  const account = scope.accountId
+    ? await configService.getAccountById(scope.accountId, userId)
+    : scope.label
+      ? await configService.getAccountByLabel(scope.label, userId)
+      : (await configService.getAllAccounts(userId)).find((candidate) => candidate.isActive);
+  if (!account?.isActive || (scope.label && scope.label !== account.label)) {
+    throw new ZoneConfigRequestError(403, "ACCOUNT_FORBIDDEN", "An active owned Cloudflare account is required");
+  }
+  return { accountId: account.id, credentials: await getCredentials(userId, account.id) };
+}
+
+async function verifyConfigZone(credentials: CloudflareCredentials, zoneId: string, zoneName: string) {
+  const zone = await cloudflareService.getZoneDetails(credentials, zoneId);
+  if (zone.id !== zoneId || zone.name.toLowerCase() !== zoneName) {
+    throw new ZoneConfigRequestError(400, "ZONE_NAME_MISMATCH", "Zone ID and hostname do not match");
+  }
+  return zone;
+}
+
+// The generic runner retries rejected workers. Copy/clone writes are additive and
+// non-idempotent: cache each attempt (including rejection) within this job instead
+// of creating duplicate rules/zones on those retries. Preserve partial step results.
+function createConfigJob(
+  type: string, ownerId: string, inputs: Array<{ key: string; label: string }>,
+  worker: (item: { key: string; label?: string }) => Promise<{ steps: ApplyStepResult[]; [key: string]: unknown }>,
+) {
+  const attempts = new Map<string, Promise<{ steps: ApplyStepResult[]; [key: string]: unknown }>>();
+  let job: ReturnType<typeof createJob> | undefined;
+  job = createJob(type, ownerId, inputs, (item) => {
+    let attempt = attempts.get(item.key);
+    if (!attempt) {
+      attempt = worker(item).then((result) => {
+        const errors = result.steps.filter((step) => step.status === "error");
+        if (errors.length > 0) {
+          const jobItem = job?.items.find((entry) => entry.key === item.key);
+          if (jobItem) jobItem.result = result;
+          throw new Error(errors.map((step) => `${step.step}: ${step.detail ?? "Failed"}`).join("; "));
+        }
+        return result;
+      });
+      attempts.set(item.key, attempt);
+    }
+    return attempt;
+  });
+  return job;
+}
+
 domainsRouter.post("/copy-config", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
-  const bodySchema = z.object({
-    sourceZoneId: z.string().min(1),
-    sourceZoneName: z.string().min(1),
-    targets: z
-      .array(z.object({ zoneId: z.string().min(1), zoneName: z.string().min(1) }))
-      .min(1)
-      .max(100),
-    components: z.array(zoneConfigComponentSchema).min(1),
-    dnsMode: dnsModeSchema,
-  });
   try {
-    const body = bodySchema.parse(req.body);
-    const components = [...new Set(body.components)] as ZoneConfigComponent[];
-    const credentials = await getCredentials(auth.userId, accountId, label);
-    const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
-
-    // Snapshot the source zone once; every target applies the same snapshot.
-    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, components);
-
-    const job = createJob(
-      "copy-config",
-      auth.userId,
-      body.targets.map((target) => ({ key: target.zoneId, label: target.zoneName })),
-      async (item) => {
-        const target = body.targets.find((t) => t.zoneId === item.key)!;
+    const body = z.object({
+      ...configRequestFields,
+      targets: z.array(z.object({ zoneId: configZoneIdSchema, zoneName: configHostnameSchema }).strict()).min(1).max(100),
+    }).strict().parse(req.body);
+    const targetIds = body.targets.map((target) => target.zoneId);
+    if (targetIds.includes(body.sourceZoneId) || new Set(targetIds).size !== targetIds.length) {
+      throw new ZoneConfigRequestError(400, "COPY_TARGETS_INVALID", "Targets must be distinct and must not include the source");
+    }
+    const { accountId, credentials } = await resolveConfigScope(auth.userId, req.query);
+    await verifyConfigZone(credentials, body.sourceZoneId, body.sourceZoneName);
+    // Preflight every target under these credentials before creating any mutation job.
+    for (const target of body.targets) await verifyConfigZone(credentials, target.zoneId, target.zoneName);
+    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, body.components);
+    const job = createConfigJob("copy-config", auth.userId,
+      body.targets.map((target) => ({ key: target.zoneId, label: target.zoneName })), async (item) => {
+        const target = body.targets.find((candidate) => candidate.zoneId === item.key)!;
         const steps = await applyZoneConfig(credentials, target, snapshot, body.sourceZoneName, {
-          dnsMode: body.dnsMode,
-          components,
+          dnsMode: body.dnsMode, components: body.components,
         });
         await recordChangeSafe({
-          ownerId: auth.userId,
-          accountId: resolvedAccountId ?? undefined,
-          zoneId: target.zoneId,
-          action: "config.copy",
-          items: [
-            {
-              resourceType: "zone_config",
-              resourceId: target.zoneId,
-              after: { source: body.sourceZoneName, components, steps: summarizeApplySteps(steps) },
-            },
-          ],
+          ownerId: auth.userId, accountId, zoneId: target.zoneId, action: "config.copy",
+          status: steps.some((step) => step.status === "error") ? "error" : "done",
+          items: [{ resourceType: "zone_config", resourceId: target.zoneId,
+            after: { source: body.sourceZoneName, components: body.components, steps: summarizeApplySteps(steps) } }],
         });
         return { zoneId: target.zoneId, steps };
-      },
-    );
-
+      });
     res.status(202).json({ jobId: job.id });
-  } catch (error: any) {
+  } catch (error) {
     sendApiError(res, error, {
-      status: 400,
-      code: "COPY_CONFIG_FAILED",
+      status: error instanceof ZoneConfigRequestError ? error.status : 400,
+      code: error instanceof ZoneConfigRequestError ? error.code : "COPY_CONFIG_FAILED",
       detail: "Copy config failed",
     });
   }
 });
 
-// Clone a domain: create new zones and apply the source zone's config snapshot to each
 domainsRouter.post("/clone", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
-  const bodySchema = z.object({
-    sourceZoneId: z.string().min(1),
-    sourceZoneName: z.string().min(1),
-    newDomains: z.array(z.string()).min(1).max(50),
-    components: z.array(zoneConfigComponentSchema).min(1),
-    dnsMode: dnsModeSchema,
-  });
   try {
-    const body = bodySchema.parse(req.body);
-    const components = [...new Set(body.components)] as ZoneConfigComponent[];
-
-    // Normalize: trim, lowercase, dedupe, validate (same rules as bulk-create)
-    const names = [...new Set(body.newDomains.map((n) => n.trim().toLowerCase()).filter(Boolean))];
-    const invalid = names.filter((n) => !DOMAIN_NAME_REGEX.test(n));
-    if (invalid.length > 0) {
-      return sendApiError(res, new Error(`Tên domain không hợp lệ: ${invalid.join(", ")}`), {
-        status: 400,
-        code: "DOMAIN_VALIDATION_FAILED",
-        detail: "Domain validation failed",
-      });
+    const body = z.object({ ...configRequestFields, newDomains: z.array(z.string().max(1024)).min(1).max(50) }).strict().parse(req.body);
+    const names = [...new Set(body.newDomains.map((name) => name.trim().toLowerCase()).filter(Boolean))];
+    if (names.length === 0) throw new ZoneConfigRequestError(400, "DOMAIN_LIST_EMPTY", "Domain list is empty");
+    if (names.some((name) => !configHostnameSchema.safeParse(name).success)) {
+      throw new ZoneConfigRequestError(400, "DOMAIN_VALIDATION_FAILED", "Invalid new domain name");
     }
-    if (names.length === 0) {
-      return sendApiError(res, new Error("Danh sách domain trống"), {
-        status: 400,
-        code: "DOMAIN_LIST_EMPTY",
-        detail: "Domain list is empty",
-      });
+    if (names.includes(body.sourceZoneName)) {
+      throw new ZoneConfigRequestError(400, "DOMAIN_VALIDATION_FAILED", "Cannot clone a zone onto itself");
     }
-
-    const credentials = await getCredentials(auth.userId, accountId, label);
-    const resolvedAccountId = await getAccountIdForCredentials(auth.userId, credentials, accountId);
-
-    // Snapshot the source zone once before starting the job.
-    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, components);
-
-    // Resolve the Cloudflare account id once to avoid repeated listAccounts calls
-    const cfAccounts = await cloudflareService.listAccounts(credentials);
-    if (cfAccounts.length === 0) {
-      return sendApiError(res, new Error("Không tìm thấy Cloudflare account để tạo zone"), {
-        status: 400,
-        code: "CLOUDFLARE_ACCOUNT_NOT_FOUND",
-        detail: "No Cloudflare account available for zone creation",
-      });
+    const { accountId, credentials } = await resolveConfigScope(auth.userId, req.query);
+    const source = await verifyConfigZone(credentials, body.sourceZoneId, body.sourceZoneName);
+    // A credential may access multiple CF accounts. Use the source account, never
+    // accounts[0], and fail closed if the upstream zone omitted its account identity.
+    if (!source.accountId || !/^[a-f0-9]{32}$/i.test(source.accountId)) {
+      throw new ZoneConfigRequestError(400, "CLOUDFLARE_ACCOUNT_NOT_FOUND", "Source zone account is unavailable");
     }
-    const cfAccountId = cfAccounts[0].id;
-
-    // Read local tags of the source domain once (best-effort) so clones inherit them.
+    const cfAccountId = source.accountId;
+    const snapshot = await collectZoneConfig(credentials, body.sourceZoneId, body.sourceZoneName, body.components);
     let sourceTags: string[] | undefined;
-    if (resolvedAccountId) {
-      try {
-        const sourceDomain = await configService.getDomainByZoneId(resolvedAccountId, body.sourceZoneId);
-        sourceTags = sourceDomain?.settings?.tags;
-      } catch (error: any) {
-        logger.warn("Failed to read source domain tags for clone", { error: error.message });
-      }
+    try {
+      sourceTags = (await configService.getDomainByZoneId(accountId, body.sourceZoneId))?.settings?.tags;
+    } catch (error: any) {
+      logger.warn("Failed to read source domain tags for clone", { error: error.message });
     }
-
-    const job = createJob(
-      "clone-domain",
-      auth.userId,
-      names.map((name) => ({ key: name, label: name })),
-      async (item) => {
-        const zone = await cloudflareService.createZone(credentials, item.key, cfAccountId, false);
-        const steps = await applyZoneConfig(
-          credentials,
-          { zoneId: zone.id, zoneName: zone.name },
-          snapshot,
-          body.sourceZoneName,
-          { dnsMode: body.dnsMode, components },
-        );
-
-        // Sync new zone into local config and copy the source domain's tags (best-effort)
-        if (resolvedAccountId) {
-          try {
-            const existing = await configService.getDomainByZoneId(resolvedAccountId, zone.id);
-            if (!existing) {
-              await configService.addDomain(resolvedAccountId, {
-                name: zone.name,
-                zoneId: zone.id,
-                status: zone.status,
-                settings: sourceTags?.length ? { tags: sourceTags } : undefined,
-              });
-            } else if (sourceTags?.length) {
-              await configService.updateDomainSettings(resolvedAccountId, existing.id, { tags: sourceTags });
-            }
-          } catch (error: any) {
-            logger.warn("Failed to sync cloned zone to config", { zoneId: zone.id, error: error.message });
-          }
+    const job = createConfigJob("clone-domain", auth.userId, names.map((name) => ({ key: name, label: name })), async (item) => {
+      const zone = await cloudflareService.createZone(credentials, item.key, cfAccountId, false);
+      // Sync immediately after creation: even a partially applied clone remains discoverable.
+      try {
+        const existing = await configService.getDomainByZoneId(accountId, zone.id);
+        if (!existing) {
+          await configService.addDomain(accountId, {
+            name: zone.name, zoneId: zone.id, status: zone.status,
+            settings: sourceTags?.length ? { tags: sourceTags } : undefined,
+          });
+        } else if (sourceTags?.length) {
+          await configService.updateDomainSettings(accountId, existing.id, { tags: sourceTags });
         }
-
-        await recordChangeSafe({
-          ownerId: auth.userId,
-          accountId: resolvedAccountId ?? undefined,
-          zoneId: zone.id,
-          action: "domain.clone",
-          items: [
-            {
-              resourceType: "zone_config",
-              resourceId: zone.id,
-              after: { source: body.sourceZoneName, components, steps: summarizeApplySteps(steps) },
-            },
-          ],
-        });
-
-        return { zoneId: zone.id, nameservers: zone.nameServers || [], steps };
-      },
-    );
-
+      } catch (error: any) {
+        logger.warn("Failed to sync cloned zone to config", { zoneId: zone.id, error: error.message });
+      }
+      const steps = await applyZoneConfig(credentials, { zoneId: zone.id, zoneName: zone.name }, snapshot, body.sourceZoneName, {
+        dnsMode: body.dnsMode, components: body.components,
+      });
+      await recordChangeSafe({
+        ownerId: auth.userId, accountId, zoneId: zone.id, action: "domain.clone",
+        status: steps.some((step) => step.status === "error") ? "error" : "done",
+        items: [{ resourceType: "zone_config", resourceId: zone.id,
+          after: { source: body.sourceZoneName, components: body.components, steps: summarizeApplySteps(steps) } }],
+      });
+      // Same result contract as bulk-create: the shared nameserver table/CSV
+      // expects name, status and camel-case nameServers. Keep the old alias.
+      return { name: zone.name, zoneId: zone.id, status: zone.status,
+        nameServers: zone.nameServers || [], nameservers: zone.nameServers || [], steps };
+    });
     res.status(202).json({ jobId: job.id });
-  } catch (error: any) {
+  } catch (error) {
     sendApiError(res, error, {
-      status: 400,
-      code: "DOMAIN_CLONE_FAILED",
-      detail: "Domain clone failed",
+      status: error instanceof ZoneConfigRequestError ? error.status : 400,
+      code: error instanceof ZoneConfigRequestError ? error.code : "CLONE_DOMAIN_FAILED",
+      detail: "Clone domain failed",
     });
   }
 });
@@ -1139,158 +1122,97 @@ domainsRouter.patch("/:zoneId/security", async (req, res) => {
   }
 });
 
-// IP Access Rules (zone-level firewall access rules)
+// IP Access Rules (restored zone-level firewall API).
 const accessRuleModeSchema = z.enum(["block", "challenge", "whitelist", "js_challenge", "managed_challenge"]);
 const accessRuleTargetSchema = z.enum(["ip", "ip_range", "country", "asn"]);
 
-const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-// Light IPv6 check: hex groups separated by ":", allowing "::" compression.
-const IPV6_RE = /^(([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,7}:|([0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,5}(:[0-9a-f]{1,4}){1,2}|([0-9a-f]{1,4}:){1,4}(:[0-9a-f]{1,4}){1,3}|([0-9a-f]{1,4}:){1,3}(:[0-9a-f]{1,4}){1,4}|([0-9a-f]{1,4}:){1,2}(:[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:((:[0-9a-f]{1,4}){1,6})|:((:[0-9a-f]{1,4}){1,7}|:))$/i;
-
-/** Validate and normalize the rule value for its target. Returns null when invalid. */
-function normalizeAccessRuleValue(target: "ip" | "ip_range" | "country" | "asn", value: string): string | null {
+function normalizeAccessRuleValue(target: z.infer<typeof accessRuleTargetSchema>, value: string): string | null {
   const trimmed = value.trim();
   switch (target) {
-    case "ip":
-      return IPV4_RE.test(trimmed) || IPV6_RE.test(trimmed) ? trimmed : null;
-    case "country":
-      return /^[a-z]{2}$/i.test(trimmed) ? trimmed.toUpperCase() : null;
-    case "asn":
-      return /^AS\d+$/i.test(trimmed) ? trimmed.toUpperCase() : null;
-    case "ip_range":
-      return trimmed.length > 0 ? trimmed : null;
+    case "ip": return !trimmed.includes("%") && isIP(trimmed) !== 0 ? trimmed : null;
+    case "country": return /^[a-z]{2}$/i.test(trimmed) ? trimmed.toUpperCase() : null;
+    case "asn": return /^AS\d+$/i.test(trimmed) ? trimmed.toUpperCase() : null;
+    case "ip_range": {
+      const [address, prefix, extra] = trimmed.split("/");
+      const version = isIP(address);
+      return version && !address.includes("%") && extra === undefined && /^\d{1,3}$/.test(prefix ?? "") &&
+        Number(prefix) <= (version === 4 ? 32 : 128) ? trimmed : null;
+    }
   }
 }
 
 domainsRouter.get("/:zoneId/access-rules", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const { zoneId } = req.params;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
   try {
-    const credentials = await getCredentials(auth.userId, accountId, label);
-    const rules = await cloudflareService.listAccessRules(credentials, zoneId);
-    res.json({ rules });
-  } catch (error: any) {
-    sendApiError(res, error, {
-      status: 500,
-      code: "ACCESS_RULES_LIST_FAILED",
-      detail: "Failed to fetch access rules",
-    });
+    const zoneId = configZoneIdSchema.parse(req.params.zoneId);
+    const scope = configScopeSchema.parse(req.query);
+    const credentials = await getCredentials(auth.userId, scope.accountId, scope.label);
+    res.json({ rules: await cloudflareService.listAccessRules(credentials, zoneId) });
+  } catch (error) {
+    sendApiError(res, error, { status: error instanceof z.ZodError ? 400 : 500,
+      code: "ACCESS_RULES_LIST_FAILED", detail: "Failed to fetch access rules" });
   }
 });
 
 domainsRouter.post("/:zoneId/access-rules", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const { zoneId } = req.params;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
-  const bodySchema = z.object({
-    mode: accessRuleModeSchema,
-    target: accessRuleTargetSchema,
-    value: z.string().min(1).max(100),
-    notes: z.string().max(200).optional(),
-  });
   try {
-    const body = bodySchema.parse(req.body);
+    const zoneId = configZoneIdSchema.parse(req.params.zoneId);
+    const scope = configScopeSchema.parse(req.query);
+    const body = z.object({ mode: accessRuleModeSchema, target: accessRuleTargetSchema,
+      value: z.string().min(1).max(100), notes: z.string().max(200).optional() }).strict().parse(req.body);
     const value = normalizeAccessRuleValue(body.target, body.value);
     if (value === null) {
-      return sendApiError(res, new Error(`Invalid value "${body.value}" for target "${body.target}"`), {
-        status: 400,
-        code: "ACCESS_RULE_INVALID_VALUE",
-        detail: "Invalid access rule value",
+      return sendApiError(res, new Error("Invalid access rule value"), {
+        status: 400, code: "ACCESS_RULE_INVALID_VALUE", detail: "Invalid access rule value",
       });
     }
-    const credentials = await getCredentials(auth.userId, accountId, label);
+    const credentials = await getCredentials(auth.userId, scope.accountId, scope.label);
     const rule = await cloudflareService.createAccessRule(credentials, zoneId, {
-      mode: body.mode,
-      configuration: { target: body.target, value },
-      notes: body.notes,
+      mode: body.mode, configuration: { target: body.target, value }, notes: body.notes,
     });
-
     await recordChangeSet({
-      ownerId: auth.userId,
-      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
-      zoneId,
-      action: "access_rule.create",
-      reversible: false,
-      items: [
-        {
-          resourceType: "access_rule",
-          resourceId: rule.id,
-          before: undefined,
-          after: rule,
-        },
-      ],
+      ownerId: auth.userId, accountId: await getAccountIdForCredentials(auth.userId, credentials, scope.accountId),
+      zoneId, action: "access_rule.create", reversible: false,
+      items: [{ resourceType: "access_rule", resourceId: rule.id, after: rule }],
     });
-
     res.status(201).json(rule);
-  } catch (error: any) {
-    sendApiError(res, error, {
-      status: 400,
-      code: "ACCESS_RULE_CREATE_FAILED",
-      detail: "Failed to create access rule",
-    });
+  } catch (error) {
+    sendApiError(res, error, { status: 400, code: "ACCESS_RULE_CREATE_FAILED", detail: "Failed to create access rule" });
   }
 });
 
 domainsRouter.patch("/:zoneId/access-rules/:ruleId", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const { zoneId, ruleId } = req.params;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
-  const bodySchema = z
-    .object({
-      mode: accessRuleModeSchema.optional(),
-      notes: z.string().max(200).optional(),
-    })
-    .refine((v) => Object.keys(v).length > 0, { message: "No updates provided" });
   try {
-    const body = bodySchema.parse(req.body);
-    const credentials = await getCredentials(auth.userId, accountId, label);
-    const rule = await cloudflareService.updateAccessRule(credentials, zoneId, ruleId, body);
-    res.json(rule);
-  } catch (error: any) {
-    sendApiError(res, error, {
-      status: 400,
-      code: "ACCESS_RULE_UPDATE_FAILED",
-      detail: "Failed to update access rule",
-    });
+    const zoneId = configZoneIdSchema.parse(req.params.zoneId);
+    const ruleId = configZoneIdSchema.parse(req.params.ruleId);
+    const scope = configScopeSchema.parse(req.query);
+    const body = z.object({ mode: accessRuleModeSchema.optional(), notes: z.string().max(200).optional() })
+      .strict().refine((value) => Object.keys(value).length > 0, "No updates provided").parse(req.body);
+    const credentials = await getCredentials(auth.userId, scope.accountId, scope.label);
+    res.json(await cloudflareService.updateAccessRule(credentials, zoneId, ruleId, body));
+  } catch (error) {
+    sendApiError(res, error, { status: 400, code: "ACCESS_RULE_UPDATE_FAILED", detail: "Failed to update access rule" });
   }
 });
 
 domainsRouter.delete("/:zoneId/access-rules/:ruleId", async (req, res) => {
   const auth = req.auth as AuthUser;
-  const { zoneId, ruleId } = req.params;
-  const accountId = req.query.accountId as string | undefined;
-  const label = req.query.label as string | undefined;
   try {
-    const credentials = await getCredentials(auth.userId, accountId, label);
+    const zoneId = configZoneIdSchema.parse(req.params.zoneId);
+    const ruleId = configZoneIdSchema.parse(req.params.ruleId);
+    const scope = configScopeSchema.parse(req.query);
+    const credentials = await getCredentials(auth.userId, scope.accountId, scope.label);
     await cloudflareService.deleteAccessRule(credentials, zoneId, ruleId);
-
     await recordChangeSet({
-      ownerId: auth.userId,
-      accountId: await getAccountIdForCredentials(auth.userId, credentials, accountId),
-      zoneId,
-      action: "access_rule.delete",
-      reversible: false,
-      items: [
-        {
-          resourceType: "access_rule",
-          resourceId: ruleId,
-          before: undefined,
-          after: undefined,
-        },
-      ],
+      ownerId: auth.userId, accountId: await getAccountIdForCredentials(auth.userId, credentials, scope.accountId),
+      zoneId, action: "access_rule.delete", reversible: false,
+      items: [{ resourceType: "access_rule", resourceId: ruleId }],
     });
-
     res.status(204).send();
-  } catch (error: any) {
-    sendApiError(res, error, {
-      status: 400,
-      code: "ACCESS_RULE_DELETE_FAILED",
-      detail: "Failed to delete access rule",
-    });
+  } catch (error) {
+    sendApiError(res, error, { status: 400, code: "ACCESS_RULE_DELETE_FAILED", detail: "Failed to delete access rule" });
   }
 });
 

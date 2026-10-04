@@ -58,6 +58,7 @@ export default function AccountSwitcher() {
   return (
     <Tooltip title={t('Active Cloudflare account')}>
       <Select
+        aria-label={t('Active Cloudflare account')}
         value={activeAccountId ?? undefined}
         onChange={handleChange}
         loading={isLoading}

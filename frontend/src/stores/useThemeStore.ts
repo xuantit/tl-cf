@@ -10,7 +10,8 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      dark: false,
+      // New visitors start with the cinematic palette; persisted choices win.
+      dark: true,
       toggle: () => set((s) => ({ dark: !s.dark })),
       setDark: (dark) => set({ dark }),
     }),

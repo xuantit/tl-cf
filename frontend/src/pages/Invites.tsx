@@ -1,27 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Card,
   Table,
+  Tag,
   Typography,
   Button,
   Space,
+  Modal,
   Form,
   Input,
   InputNumber,
   DatePicker,
   Popconfirm,
   Tooltip,
+  message,
 } from 'antd'
-import type { FormInstance } from 'antd'
-import { message, modal } from '../lib/antdApp'
+import { PlusOutlined, CopyOutlined, DeleteOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import type { Dayjs } from 'dayjs'
 import { useTranslation } from 'react-i18next'
-import { api, apiErrorDetail } from '../services/api'
-import PageHeader from '../components/PageHeader'
-import { Banner, DetailPanel, EmptyState, Tag } from '../components/ui'
+import { api } from '../services/api'
 
-const { Text } = Typography
+const { Title, Text } = Typography
 
 interface InviteCode {
   id: string
@@ -32,18 +33,6 @@ interface InviteCode {
   usedBy: string[]
   expiresAt: string | null
   createdAt: string
-}
-
-/** Days until expiry (ceil); negative/0 = expired. */
-function daysLeft(iso: string): number {
-  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000)
-}
-
-function formatDay(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 export default function Invites() {
@@ -66,13 +55,7 @@ export default function Invites() {
     )
   }
 
-  // Panel children stay mounted — reset the form here, not in an effect
-  const closeAddPanel = () => {
-    setAddOpen(false)
-    form.resetFields()
-  }
-
-  const { data: invites = [], isLoading, isError, error, refetch, isFetching } = useQuery<InviteCode[]>({
+  const { data: invites = [], isLoading, refetch, isFetching } = useQuery<InviteCode[]>({
     queryKey: ['invites'],
     queryFn: async () => (await api.get('/invites')).data,
   })
@@ -90,7 +73,7 @@ export default function Invites() {
       queryClient.invalidateQueries({ queryKey: ['invites'] })
       setAddOpen(false)
       form.resetFields()
-      modal.success({
+      Modal.success({
         title: t('Invite code created'),
         content: (
           <Space orientation="vertical" style={{ width: '100%' }}>
@@ -130,230 +113,133 @@ export default function Invites() {
       title: t('Code'),
       dataIndex: 'code',
       render: (code: string) => (
-        <span className="inline-flex items-center gap-1">
-          <span className="font-mono text-[12px] font-medium text-fg">{code}</span>
+        <Space>
+          <Text strong style={{ fontFamily: 'monospace' }}>{code}</Text>
           <Tooltip title={t('Copy code')}>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t('Copy code')}
-              onClick={(e) => {
-                e.stopPropagation()
-                copy(code, t('invite code'))
-              }}
-            >
-              ⧉
-            </Button>
+            <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => copy(code, t('invite code'))} />
           </Tooltip>
           <Tooltip title={t('Copy registration link')}>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t('Copy registration link')}
-              onClick={(e) => {
-                e.stopPropagation()
-                copy(registerLink(code), t('registration link'))
-              }}
-            >
-              ↗
-            </Button>
+            <Button type="text" size="small" icon={<LinkOutlined />} onClick={() => copy(registerLink(code), t('registration link'))} />
           </Tooltip>
-        </span>
+        </Space>
       ),
     },
     {
       title: t('Note'),
       dataIndex: 'note',
       ellipsis: true,
-      responsive: ['md'],
-      render: (note: string | null) =>
-        note ? <span className="text-[12px] text-fg-2">{note}</span> : <span className="text-fg-3">—</span>,
+      render: (note: string | null) => note || <Text type="secondary">—</Text>,
     },
     {
       title: t('Used'),
       key: 'usage',
-      width: 90,
+      width: 120,
       render: (_, r) => {
         const exhausted = r.usedCount >= r.maxUses
-        const tag = (
-          <Tag variant={exhausted ? 'default' : 'ok'}>
-            {r.usedCount}/{r.maxUses}
-          </Tag>
+        const tag = <Tag color={exhausted ? 'default' : 'green'} variant="filled">{r.usedCount}/{r.maxUses}</Tag>
+        return r.usedBy.length > 0 ? (
+          <Tooltip title={r.usedBy.join(', ')}>{tag}</Tooltip>
+        ) : (
+          tag
         )
-        return r.usedBy.length > 0 ? <Tooltip title={r.usedBy.join(', ')}>{tag}</Tooltip> : tag
       },
     },
     {
       title: t('Expires'),
       dataIndex: 'expiresAt',
-      width: 130,
+      width: 170,
       render: (v: string | null) => {
-        if (!v) return <span className="font-mono text-[11px] text-fg-3">{t('No expiry')}</span>
-        const left = daysLeft(v)
-        if (left <= 0)
-          return <span className="font-mono text-[11px] text-danger">{t('expired')}</span>
-        return (
-          <span className="font-mono text-[11px] text-fg-2" title={new Date(v).toLocaleString(dateLocale)}>
-            {t('{{count}} days left', { count: left })}
-          </span>
-        )
+        if (!v) return <Text type="secondary">{t('No expiry')}</Text>
+        const expired = new Date(v) < new Date()
+        return <Tag color={expired ? 'red' : 'blue'} variant="filled">{new Date(v).toLocaleString(dateLocale)}</Tag>
       },
     },
     {
       title: t('Created at'),
       dataIndex: 'createdAt',
-      width: 110,
-      responsive: ['lg'],
-      render: (v: string) => <span className="font-mono text-[11px] text-fg-3">{formatDay(v)}</span>,
+      width: 170,
+      render: (v: string) => new Date(v).toLocaleString(dateLocale),
     },
     {
       title: '',
       key: 'actions',
       width: 60,
-      align: 'right',
       render: (_, r) => (
         <Popconfirm
           title={t('Revoke this invite code?')}
           description={t('Anyone who has not registered yet will no longer be able to use it.')}
           onConfirm={() => deleteMutation.mutate(r.id)}
           okText={t('Revoke')}
-          okButtonProps={{ danger: true }}
           cancelText={t('Cancel')}
         >
-          <Button type="text" danger size="small">
-            {t('revoke')}
-          </Button>
+          <Button type="text" danger size="small" icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
     },
   ]
 
-  const pendingCount = invites.filter(
-    (i) => i.usedCount < i.maxUses && (!i.expiresAt || daysLeft(i.expiresAt) > 0),
-  ).length
-
   return (
-    // Panel is a flex sibling of the content so it pushes it left (DetailPanel pattern)
-    <div className="relative flex min-h-full">
-      <div className="fade-in min-w-0 flex-1 p-[clamp(12px,3vw,24px)]">
-      <PageHeader
-        title={t('Invite codes')}
-        crumb={t('{{count}} codes · {{pending}} pending', { count: invites.length, pending: pendingCount })}
-        actions={
-          <>
-            <Button onClick={() => refetch()} loading={isFetching}>
-              ↻ {t('Reload')}
-            </Button>
-            <Button type="primary" onClick={() => setAddOpen(true)}>
-              + {t('Create invite code')}
-            </Button>
-          </>
-        }
-      />
-      <Banner tone="info" className="mb-3">
-        {t('Invite codes are temporarily unused. New users register by verifying their email.')}
-      </Banner>
-      {isError && (
-        <Banner
-          tone="err"
-          className="mb-3"
-          actions={
-            <Button size="small" onClick={() => refetch()}>
-              ↻ {t('Retry')}
-            </Button>
-          }
-        >
-          {apiErrorDetail(error) || t('Could not load invite codes')}
-        </Banner>
-      )}
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={invites}
-        loading={isLoading}
-        rowClassName={(r) =>
-          r.usedCount >= r.maxUses || (r.expiresAt && daysLeft(r.expiresAt) <= 0) ? 'opacity-50' : ''
-        }
-        locale={{
-          emptyText: (
-            <EmptyState
-              icon="✉"
-              title={t('No invite codes')}
-              desc={t('Invite codes are temporarily unused. New users register by verifying their email.')}
-              actions={
-                <Button type="primary" size="small" onClick={() => setAddOpen(true)}>
-                  + {t('Create invite code')}
-                </Button>
-              }
-            />
-          ),
-        }}
-        pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        scroll={{ x: 'max-content' }}
-      />
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
+            {t('Invite codes')}
+          </Title>
+          <Text type="secondary">
+            {t('Users need an invite code to register. Send the code or the registration link to the invitee.')}
+          </Text>
+        </div>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+            {t('Reload')}
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
+            {t('Create invite code')}
+          </Button>
+        </Space>
       </div>
+      <Card>
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={invites}
+          loading={isLoading}
+          pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          scroll={{ x: 'max-content' }}
+        />
+      </Card>
 
-      <CreateInvitePanel
+      <Modal
+        title={t('Create invite code')}
         open={addOpen}
-        form={form}
-        saving={createMutation.isPending}
-        onClose={closeAddPanel}
-        onFinish={(values) => createMutation.mutate(values)}
-      />
+        onCancel={() => setAddOpen(false)}
+        onOk={() => form.submit()}
+        okText={t('Create')}
+        cancelText={t('Cancel')}
+        confirmLoading={createMutation.isPending}
+        destroyOnHidden
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ maxUses: 1 }}
+          onFinish={(values) => createMutation.mutate(values)}
+        >
+          <Form.Item name="note" label={t('Note')} extra={t('e.g. invite for Mr. A, marketing team')}>
+            <Input maxLength={200} placeholder={t('Not required')} />
+          </Form.Item>
+          <Form.Item
+            name="maxUses"
+            label={t('Max uses')}
+            rules={[{ required: true, message: t('Enter max uses') }]}
+          >
+            <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="expiresAt" label={t('Expires')} extra={t('Leave empty for no time limit')}>
+            <DatePicker showTime style={{ width: '100%' }} placeholder={t('Pick an expiry time')} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }
-
-interface CreateInviteValues {
-  note?: string
-  maxUses: number
-  expiresAt?: Dayjs
-}
-
-function CreateInvitePanel({
-  open,
-  form,
-  saving,
-  onClose,
-  onFinish,
-}: {
-  open: boolean
-  form: FormInstance<CreateInviteValues>
-  saving: boolean
-  onClose: () => void
-  onFinish: (values: CreateInviteValues) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <DetailPanel
-      open={open}
-      title={t('Create invite code')}
-      onClose={onClose}
-      footer={
-        <span className="ml-auto flex gap-2">
-          <Button onClick={onClose}>{t('Cancel')}</Button>
-          <Button type="primary" loading={saving} onClick={() => form.submit()}>
-            {t('Create')}
-          </Button>
-        </span>
-      }
-    >
-      <Form form={form} layout="vertical" initialValues={{ maxUses: 1 }} onFinish={onFinish}>
-        <Form.Item name="note" label={t('Note')} extra={t('e.g. invite for Mr. A, marketing team')}>
-          <Input maxLength={200} placeholder={t('Not required')} />
-        </Form.Item>
-        <Form.Item
-          name="maxUses"
-          label={t('Max uses')}
-          rules={[{ required: true, message: t('Enter max uses') }]}
-        >
-          <InputNumber min={1} max={1000} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="expiresAt" label={t('Expires')} extra={t('Leave empty for no time limit')}>
-          <DatePicker showTime style={{ width: '100%' }} placeholder={t('Pick an expiry time')} />
-        </Form.Item>
-      </Form>
-    </DetailPanel>
-  )
-}
-

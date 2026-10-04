@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { DetailPanel } from './DetailPanel'
 import {
   Banner,
   Dot,
@@ -14,6 +15,17 @@ import {
 } from './index'
 
 describe('ui primitives', () => {
+  it('keeps closed panel fields mounted but removes them from keyboard interaction', () => {
+    const { container, rerender } = render(
+      <DetailPanel open={false} title="Edit" onClose={() => {}}><input aria-label="Value" defaultValue="saved" /></DetailPanel>,
+    )
+    expect(container.querySelector('aside')).toHaveAttribute('inert')
+    expect(container.querySelector('input')).toHaveValue('saved')
+    rerender(<DetailPanel open title="Edit" onClose={() => {}}><input aria-label="Value" defaultValue="saved" /></DetailPanel>)
+    expect(container.querySelector('aside')).not.toHaveAttribute('inert')
+    expect(screen.getByRole('textbox', { name: 'Value' })).toHaveValue('saved')
+  })
+
   it('Tag renders variants with matching classes', () => {
     const { container } = render(
       <>

@@ -1,20 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Alert, Button, Divider, Form, Input, InputNumber, Select, Space, Typography } from 'antd'
-import { message } from '../../lib/antdApp'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { PAGE_RULE_PRESETS, type PageRuleInput } from './pageRulePresets'
+import { message } from '../../lib/antdApp'
+import { PAGE_RULE_PRESETS, type PageRuleAction, type PageRuleInput } from './pageRulePresets'
 
 const { Text } = Typography
 
 type RuleStatus = 'active' | 'disabled'
 
-type ActionValue = string | number | boolean | Record<string, unknown>
-
 type FormValues = {
   targetValue: string
   status: RuleStatus
-  actions: Array<{ id?: string; value?: ActionValue }>
+  actions: Array<Partial<PageRuleAction>>
 }
 
 interface Props {
@@ -23,15 +21,8 @@ interface Props {
   initialValue?: PageRuleInput
   onSubmit: (values: PageRuleInput) => void
   onCancel: () => void
-  /** Hiện nút Xoá khi đang sửa rule (design panel). */
   onDelete?: () => void
 }
-
-/**
- * Form tạo/sửa Page Rule (legacy) — render bên trong DetailPanel (panel trượt
- * phải). Caller phải gắn `key` theo rule đang sửa để remount và nhận
- * initialValues mới (panel giữ children luôn mounted).
- */
 
 const NO_VALUE_ACTIONS = new Set(['always_use_https', 'disable_performance', 'disable_security', 'disable_apps'])
 const ON_OFF_ACTIONS = new Set(['automatic_https_rewrites', 'rocket_loader', 'ip_geolocation'])
@@ -80,8 +71,8 @@ const ACTION_OPTIONS = [
 function toFormValues(initialValue?: PageRuleInput, zoneName?: string): FormValues {
   return {
     targetValue: initialValue?.targets?.[0]?.constraint?.value ?? (zoneName ? `www.${zoneName}/*` : ''),
-    status: (initialValue?.status as RuleStatus) ?? 'active',
-    actions: initialValue?.actions?.length ? (initialValue.actions as FormValues['actions']) : [],
+    status: initialValue?.status ?? 'active',
+    actions: initialValue?.actions?.length ? initialValue.actions : [],
   }
 }
 
@@ -115,7 +106,7 @@ function ActionValueEditor({ fieldName, actionId }: { fieldName: number; actionI
           />
         </Form.Item>
         <Form.Item
-          style={{ marginBottom: 0, flex: 1 }}
+          style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
           name={[fieldName, 'value', 'url']}
           rules={[{ required: true, message: 'Required' }]}
         >
@@ -162,6 +153,7 @@ function ActionValueEditor({ fieldName, actionId }: { fieldName: number; actionI
   )
 }
 
+// Pure form: the caller owns the panel and remounts by rule ID (or on reopen).
 export default function PageRuleFormModal({
   zoneName,
   loading,
@@ -188,7 +180,10 @@ export default function PageRuleFormModal({
     setSelectedPreset(presetKey)
     if (presetKey === 'custom') {
       form.resetFields()
-      form.setFieldsValue(toFormValues(undefined, zoneName))
+      const values = toFormValues(undefined, zoneName)
+      form.setFieldValue('targetValue', values.targetValue)
+      form.setFieldValue('status', values.status)
+      form.setFieldValue('actions', values.actions)
       return
     }
     const preset = PAGE_RULE_PRESETS.find((item) => item.key === presetKey)
@@ -198,15 +193,13 @@ export default function PageRuleFormModal({
     const values = preset.build(zone)
     // Reset first so stale nested action values don't linger, then apply the preset.
     form.resetFields()
-    form.setFieldsValue({
-      targetValue: values.targets[0]?.constraint.value ?? '',
-      status: values.status ?? 'active',
-      actions: values.actions.map((action) => ({ id: action.id, value: action.value as ActionValue })),
-    })
+    form.setFieldValue('targetValue', values.targets[0]?.constraint.value ?? '')
+    form.setFieldValue('status', values.status ?? 'active')
+    form.setFieldValue('actions', values.actions.map((action) => ({ id: action.id, value: action.value })))
   }
 
   const handleFinish = (values: FormValues) => {
-    const actions = (values.actions ?? []).filter((action) => !!action.id)
+    const actions = (values.actions ?? []).filter((action): action is PageRuleAction => !!action.id)
     if (actions.length === 0) {
       message.error(t('At least one action is required'))
       return
@@ -219,10 +212,11 @@ export default function PageRuleFormModal({
     }
 
     const normalizedActions = actions.map((action) =>
-      NO_VALUE_ACTIONS.has(action.id as string) ? { id: action.id as string } : { id: action.id as string, value: action.value },
+      NO_VALUE_ACTIONS.has(action.id) ? { id: action.id } : { id: action.id, value: action.value },
     )
 
     onSubmit({
+      ...(initialValue?.priority !== undefined ? { priority: initialValue.priority } : {}),
       status: values.status,
       targets: [
         {
@@ -238,10 +232,17 @@ export default function PageRuleFormModal({
   }
 
   return (
-    <Form form={form} layout='vertical' onFinish={handleFinish} initialValues={toFormValues(initialValue, zoneName)}>
+    <Form
+      form={form}
+      layout='vertical'
+      onFinish={handleFinish}
+      initialValues={toFormValues(initialValue, zoneName)}
+      style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}
+    >
+      <div style={{ flex: 1 }}>
         {!isEdit && (
           <Form.Item label={t('Load a template')}>
-            <Select value={selectedPreset} onChange={applyPreset} options={presetOptions} />
+            <Select aria-label={t('Load a template')} value={selectedPreset} onChange={applyPreset} options={presetOptions} />
           </Form.Item>
         )}
 
@@ -274,24 +275,26 @@ export default function PageRuleFormModal({
           {(fields, { add, remove }) => (
             <Space orientation='vertical' style={{ width: '100%', marginTop: 8 }} size='small'>
               {fields.map((field) => (
-                <div key={field.key} className="flex flex-wrap items-start gap-2">
+                <div key={field.key} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
                   <Form.Item
                     name={[field.name, 'id']}
-                    style={{ marginBottom: 0, flex: '1 1 170px', minWidth: 170 }}
+                    style={{ marginBottom: 0, flex: '1 1 180px', minWidth: 0 }}
                     rules={[{ required: true, message: t('Pick a Setting') }]}
                   >
                     <Select
+                      aria-label={t('Pick a Setting')}
                       placeholder={t('Pick a Setting')}
                       options={ACTION_OPTIONS}
                       onChange={(nextActionId) => {
-                        const current = form.getFieldValue('actions') || []
-                        current[field.name] = { id: nextActionId, value: defaultValueForAction(nextActionId) }
-                        form.setFieldsValue({ actions: current })
+                        form.setFieldValue(['actions', field.name], {
+                          id: nextActionId,
+                          value: defaultValueForAction(nextActionId),
+                        })
                       }}
                     />
                   </Form.Item>
 
-                  <div style={{ flex: '1 1 180px', minWidth: 180 }}>
+                  <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                     {/* shouldUpdate ensures the value editor re-renders when the setting changes or a template is loaded */}
                     <Form.Item
                       noStyle
@@ -308,7 +311,7 @@ export default function PageRuleFormModal({
                     </Form.Item>
                   </div>
 
-                  <Button icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                  <Button aria-label={t('Remove setting')} icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
                 </div>
               ))}
 
@@ -329,22 +332,23 @@ export default function PageRuleFormModal({
             ]}
           />
         </Form.Item>
+      </div>
 
-        <Form.Item style={{ marginTop: 8, marginBottom: 0 }}>
-          <div className="flex w-full items-center gap-2">
-            {isEdit && onDelete && (
-              <Button danger onClick={onDelete}>
-                {t('Delete')}
-              </Button>
-            )}
-            <span className="ml-auto flex gap-2">
-              <Button onClick={onCancel}>{t('Cancel')}</Button>
-              <Button type='primary' htmlType='submit' loading={loading}>
-                {isEdit ? t('Update') : t('Save and Deploy')}
-              </Button>
-            </span>
-          </div>
-        </Form.Item>
-      </Form>
+      <div className='flex flex-none flex-wrap items-center justify-between gap-2 border-t border-t-stroke pt-3'>
+        <div>
+          {isEdit && onDelete && (
+            <Button danger aria-label={t('Delete')} icon={<DeleteOutlined />} onClick={onDelete} disabled={loading}>
+              {t('Delete')}
+            </Button>
+          )}
+        </div>
+        <Space>
+          <Button onClick={onCancel}>{t('Cancel')}</Button>
+          <Button type='primary' htmlType='submit' loading={loading}>
+            {isEdit ? t('Update') : t('Save and Deploy')}
+          </Button>
+        </Space>
+      </div>
+    </Form>
   )
 }

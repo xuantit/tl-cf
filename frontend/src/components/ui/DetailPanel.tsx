@@ -39,6 +39,7 @@ export function DetailPanel({ open, title, footer, padded = true, onClose, child
   const panel = (
     <aside
       aria-hidden={!open}
+      inert={!open}
       className={`h-full flex-none overflow-hidden bg-bg transition-[width] duration-200 ease-out max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 ${
         open
           ? 'w-[min(440px,46vw)] border-l border-l-stroke max-md:w-[min(420px,94vw)] max-md:shadow-[-18px_0_40px_-24px_rgba(0,0,0,0.5)]'

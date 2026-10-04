@@ -7,28 +7,33 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
-   Console 1a semantic tokens (light) + dark overrides
+  Cloud workspace palette: warm gold, layered navy, accessible light variant
    ============================================================ */
 :root {
   --bg: #ffffff;
-  --bg-app: #f6f6f7;
-  --bg-side: #fbfbfc;
-  --bg-hover: #f7f7f8;
-  --bg-sel: #fff7ef;
-  --stroke: #e7e7ea;
-  --stroke-2: #f0f0f2;
-  --fg: #101114;
-  --fg-2: #4d525a;
-  --fg-3: #767c86;
-  --accent: #f6821f;
-  --accent-hover: #e4720f;
-  --accent-soft: #fff2e5;
+  --bg-app: #f3f4f8;
+  --bg-side: #fafbfe;
+  --bg-hover: #f0f2f8;
+  --bg-sel: #fff6dc;
+  --stroke: #dfe3ed;
+  --stroke-2: #eceef4;
+  --fg: #202433;
+  --fg-2: #535e74;
+  --fg-3: #68738a;
+  --accent: #946500;
+  --accent-hover: #785100;
+  --accent-soft: #fff0c4;
+  --accent-solid: #f4d675;
+  --on-accent: #22232b;
   --ok: #12a150;
   --warn: #f5a524;
   --danger: #e5484d;
   --info: #0070f3;
   --off: #9aa0a6;
-  --bar: #17181c;
+  --bar: #202433;
+  --hero-bg: #232839;
+  --hero-fg: #f5f6fa;
+  --hero-muted: #c0c6d6;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --d1: 110ms;
@@ -37,18 +42,25 @@
 }
 
 .dark {
-  --bg: #0d0e11;
-  --bg-app: #08090b;
-  --bg-side: #0a0b0e;
-  --bg-hover: #15171b;
-  --bg-sel: #1e1508;
-  --stroke: #22242a;
-  --stroke-2: #1a1c21;
-  --fg: #f0f1f3;
-  --fg-2: #aab0ba;
-  --fg-3: #7f8591;
-  --accent-soft: #2a1a09;
-  --bar: #111216;
+  --bg: #212430;
+  --bg-app: #191b24;
+  --bg-side: #151720;
+  --bg-hover: #2b3040;
+  --bg-sel: #38342a;
+  --stroke: #34394a;
+  --stroke-2: #2c3040;
+  --fg: #f3f4f8;
+  --fg-2: #c0c6d5;
+  --fg-3: #9da6bc;
+  --accent: #f4d675;
+  --accent-hover: #ffe5a0;
+  --accent-soft: #363126;
+  --ok: #5ccea0;
+  --warn: #f3c36b;
+  --danger: #ff808c;
+  --info: #93b6ff;
+  --off: #98a1b4;
+  --bar: #12141c;
 }
 
 /* Map semantic vars into Tailwind theme (inline so .dark overrides resolve per-element) */
@@ -155,7 +167,7 @@
 }
 
 ::selection {
-  background: rgba(246, 130, 31, 0.25);
+  background: rgba(225, 188, 81, 0.3);
 }
 
 @keyframes fadeIn {
@@ -188,4 +200,19 @@
 
 .slide-up {
   animation: slideUp var(--d2) var(--ease);
+}
+
+/* Visible keyboard focus without changing mouse interaction. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

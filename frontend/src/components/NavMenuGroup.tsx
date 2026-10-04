@@ -18,7 +18,7 @@ export default function NavMenuGroup({ item, mobile = false }: { item: NavEntry;
       <button type="button" aria-expanded={open} aria-controls={panelId}
         onClick={() => setToggle({ pathname, open: !open })}
         className={`flex w-full cursor-pointer items-center gap-[9px] border-0 bg-transparent text-left transition-colors ${
-          mobile ? 'px-[14px] py-[9px] text-[13px]' : 'h-[32px] rounded-[6px] px-[9px] text-[14px]'
+          mobile ? 'px-[14px] py-[12px] text-[14px]' : 'h-[40px] rounded-[10px] px-[12px] text-[14px]'
         } ${active ? '!bg-accent-soft font-medium text-accent' : 'text-fg-2 hover:bg-bg-hover hover:text-fg'}`}>
         <span aria-hidden="true" className="w-[18px] flex-none text-center text-[15px] opacity-90">{item.icon}</span>
         <span className="truncate">{t(item.label)}</span>

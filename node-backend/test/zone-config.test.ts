@@ -1,6 +1,6 @@
 import request from "supertest";
 import bcrypt from "bcryptjs";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { eq } from "drizzle-orm";
 
@@ -43,6 +43,15 @@ afterAll(async () => {
   await db.delete(bulkJobs).where(eq(bulkJobs.ownerId, userId));
   await db.delete(cloudflareAccounts).where(eq(cloudflareAccounts.id, accountId));
   await db.delete(users).where(eq(users.id, userId));
+});
+
+beforeEach(() => {
+  // Route preflight now verifies the IDs/names under the selected credentials.
+  vi.spyOn(cloudflareService, "getZoneDetails").mockImplementation(async (_credentials, zoneId) => {
+    if (zoneId === "zone-src") return { id: zoneId, name: "source.com", status: "active", accountId: "a".repeat(32) };
+    if (zoneId === "zone-tgt") return { id: zoneId, name: "target.com", status: "active", accountId: "a".repeat(32) };
+    throw new Error(`Unexpected zoneId ${zoneId}`);
+  });
 });
 
 afterEach(() => {

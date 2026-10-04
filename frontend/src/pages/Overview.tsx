@@ -144,7 +144,7 @@ export default function Overview() {
       ) : summary && zones ? (
         <>
           {/* Stat strip — mirrors StatStrip markup with clickable cells */}
-          <div className="flex flex-wrap border-b border-stroke">
+          <div className="overview-stats">
             {[
               { value: zones.total, label: t('total zones'), to: '/' },
               {
@@ -170,12 +170,12 @@ export default function Overview() {
                 key={i}
                 type="button"
                 onClick={() => navigate(item.to)}
-                className="flex-1 cursor-pointer border-0 border-r border-solid border-stroke bg-transparent p-[10px_16px] text-left transition-colors last:border-r-0 hover:bg-bg-hover"
+                className="overview-stat"
               >
-                <div className="font-mono text-[19px] font-semibold leading-[1.15] tracking-[-.02em] text-fg">
+                <div className="overview-stat-value">
                   {item.value}
                 </div>
-                <div className="mt-[2px] font-mono text-[11px] uppercase tracking-[.09em] text-fg-3">
+                <div className="overview-stat-label">
                   {item.label}
                 </div>
                 {item.delta != null && (
@@ -186,7 +186,7 @@ export default function Overview() {
           </div>
 
           {/* grid-3 panes */}
-          <div className="grid grid-cols-1 border-b border-stroke md:grid-cols-3">
+          <div className="overview-details grid grid-cols-1 md:grid-cols-3">
             {showPlanPane && (
               <div className="border-b border-stroke p-[13px_16px] md:border-b-0">
                 <Lbl className="mb-[9px] block">{t('Plan distribution')}</Lbl>

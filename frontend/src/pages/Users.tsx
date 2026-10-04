@@ -1,14 +1,28 @@
-import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Dropdown, Table } from 'antd'
-import { message, modal } from '../lib/antdApp'
+import {
+  Card,
+  Table,
+  Tag,
+  Typography,
+  Button,
+  Space,
+  Popconfirm,
+  Tooltip,
+  Select,
+} from 'antd'
+import {
+  ReloadOutlined,
+  DeleteOutlined,
+  LockOutlined,
+  UnlockOutlined,
+} from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
-import { api, apiErrorDetail } from '../services/api'
+import { api } from '../services/api'
+import { message } from '../lib/antdApp'
 import { useAuthStore, getUserIdFromToken } from '../stores/useAuthStore'
-import PageHeader from '../components/PageHeader'
-import ConfirmDestructive from '../components/ConfirmDestructive'
-import { Banner, Dot, EmptyState, Tag } from '../components/ui'
+
+const { Title, Text } = Typography
 
 interface AdminUser {
   id: string
@@ -20,20 +34,13 @@ interface AdminUser {
   templateCount: number
 }
 
-function formatDay(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
 export default function Users() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const dateLocale = i18n.language === 'vi' ? 'vi-VN' : 'en-US'
   const queryClient = useQueryClient()
   const myUserId = getUserIdFromToken(useAuthStore((s) => s.token))
-  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null)
 
-  const { data: users = [], isLoading, isError, error, refetch, isFetching } = useQuery<AdminUser[]>({
+  const { data: users = [], isLoading, refetch, isFetching } = useQuery<AdminUser[]>({
     queryKey: ['users'],
     queryFn: async () => (await api.get('/users')).data,
   })
@@ -55,172 +62,135 @@ export default function Users() {
     mutationFn: async (id: string) => api.delete(`/users/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      setDeleteTarget(null)
       message.success(t('User deleted'))
     },
     onError: (e: unknown) => message.error(errDetail(e) || t('Delete failed')),
   })
-
-  const adminCount = users.filter((u) => u.role === 'admin').length
-
-  const confirmLock = (u: AdminUser) => {
-    modal.confirm({
-      title: u.isActive ? t('Lock this user?') : t('Unlock this user?'),
-      content: u.isActive ? t('The user will be logged out and unable to sign in.') : undefined,
-      okText: u.isActive ? t('Lock') : t('Unlock'),
-      cancelText: t('Cancel'),
-      okButtonProps: u.isActive ? { danger: true } : undefined,
-      onOk: () => patchMutation.mutate({ id: u.id, isActive: !u.isActive }),
-    })
-  }
 
   const columns: ColumnsType<AdminUser> = [
     {
       title: 'Email',
       dataIndex: 'email',
       render: (email: string, r) => (
-        <span className="inline-flex items-center gap-[5px]">
-          <span className="font-mono text-[12px] font-medium text-fg">{email}</span>
-          {r.id === myUserId && <Tag variant="acc">{t('you')}</Tag>}
-        </span>
+        <Space>
+          <Text strong={r.id === myUserId}>{email}</Text>
+          {r.id === myUserId && <Tag color="orange" variant="filled">{t('You')}</Tag>}
+        </Space>
       ),
     },
     {
       title: t('Role'),
       dataIndex: 'role',
-      width: 90,
-      render: (role: AdminUser['role']) => (
-        <Tag variant={role === 'admin' ? 'err' : 'default'}>{role}</Tag>
-      ),
-    },
-    {
-      title: 'CF acc',
-      dataIndex: 'cfAccountCount',
-      width: 80,
-      responsive: ['md'],
-      render: (v: number) => (
-        <span className={`font-mono text-[11.5px] ${v === 0 ? 'text-fg-3' : 'text-fg-2'}`}>{v}</span>
-      ),
-    },
-    {
-      title: 'Templates',
-      dataIndex: 'templateCount',
-      width: 90,
-      responsive: ['md'],
-      render: (v: number) => (
-        <span className={`font-mono text-[11.5px] ${v === 0 ? 'text-fg-3' : 'text-fg-2'}`}>{v}</span>
+      width: 130,
+      render: (role: AdminUser['role'], r) => (
+        <Select
+          aria-label={`${t('Role')}: ${r.email}`}
+          size="small"
+          value={role}
+          disabled={r.id === myUserId || patchMutation.isPending}
+          onChange={(v) => patchMutation.mutate({ id: r.id, role: v })}
+          options={[
+            { value: 'user', label: 'User' },
+            { value: 'admin', label: 'Admin' },
+          ]}
+          style={{ width: 100 }}
+        />
       ),
     },
     {
       title: t('Status'),
       dataIndex: 'isActive',
+      width: 120,
+      render: (isActive: boolean) =>
+        isActive ? <Tag color="green" variant="filled">{t('Active')}</Tag> : <Tag color="red" variant="filled">{t('Locked')}</Tag>,
+    },
+    {
+      title: t('CF accounts'),
+      dataIndex: 'cfAccountCount',
       width: 110,
-      render: (isActive: boolean) => (
-        <span className="inline-flex items-center gap-[6px]">
-          <Dot status={isActive ? 'ok' : 'off'} />
-          <span className="text-[12px]">{isActive ? 'active' : t('locked')}</span>
-        </span>
-      ),
+      align: 'center',
+    },
+    {
+      title: 'Templates',
+      dataIndex: 'templateCount',
+      width: 100,
+      align: 'center',
     },
     {
       title: t('Created at'),
       dataIndex: 'createdAt',
-      width: 120,
-      responsive: ['lg'],
-      render: (v: string) => <span className="font-mono text-[11px] text-fg-3">{formatDay(v)}</span>,
+      width: 170,
+      render: (v: string) => new Date(v).toLocaleString(dateLocale),
     },
     {
       title: '',
       key: 'actions',
-      width: 44,
-      align: 'right',
+      width: 100,
       render: (_, r) => {
         const isSelf = r.id === myUserId
         return (
-          <Dropdown
-            trigger={['click']}
-            disabled={isSelf}
-            menu={{
-              items: [
-                { key: 'lock', label: r.isActive ? t('Lock account') : t('Unlock') },
-                {
-                  key: 'role',
-                  label: r.role === 'admin' ? t('Change role to user') : t('Change role to admin'),
-                },
-                { type: 'divider' },
-                { key: 'delete', label: t('Delete user'), danger: true },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation()
-                if (key === 'lock') confirmLock(r)
-                if (key === 'role')
-                  patchMutation.mutate({ id: r.id, role: r.role === 'admin' ? 'user' : 'admin' })
-                if (key === 'delete') setDeleteTarget(r)
-              },
-            }}
-          >
-            <Button size="small" type="text" disabled={isSelf} aria-label={t('User actions')}>
-              ⋯
-            </Button>
-          </Dropdown>
+          <Space>
+            <Tooltip title={r.isActive ? t('Lock account') : t('Unlock')}>
+              <Popconfirm
+                title={r.isActive ? t('Lock this user?') : t('Unlock this user?')}
+                description={r.isActive ? t('The user will be logged out and unable to sign in.') : undefined}
+                onConfirm={() => patchMutation.mutate({ id: r.id, isActive: !r.isActive })}
+                okText={r.isActive ? t('Lock') : t('Unlock')}
+                cancelText={t('Cancel')}
+                disabled={isSelf}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  disabled={isSelf}
+                  icon={r.isActive ? <LockOutlined /> : <UnlockOutlined />}
+                />
+              </Popconfirm>
+            </Tooltip>
+            <Tooltip title={t('Delete user')}>
+              <Popconfirm
+                title={t('Delete this user?')}
+                description={t('All {{count}} CF accounts, domains and templates of this user will be permanently deleted.', { count: r.cfAccountCount })}
+                onConfirm={() => deleteMutation.mutate(r.id)}
+                okText={t('Delete')}
+                okButtonProps={{ danger: true }}
+                cancelText={t('Cancel')}
+                disabled={isSelf}
+              >
+                <Button type="text" danger size="small" disabled={isSelf} icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </Tooltip>
+          </Space>
         )
       },
     },
   ]
 
   return (
-    <div className="fade-in p-[clamp(12px,3vw,24px)]">
-      <PageHeader
-        title={t('Users')}
-        crumb={t('{{count}} accounts · {{admins}} admin', { count: users.length, admins: adminCount })}
-        actions={
-          <Button onClick={() => refetch()} loading={isFetching}>
-            ↻ {t('Reload')}
-          </Button>
-        }
-      />
-      {isError && (
-        <Banner
-          tone="err"
-          className="mb-3"
-          actions={
-            <Button size="small" loading={isFetching} onClick={() => refetch()}>
-              ↻ {t('Retry')}
-            </Button>
-          }
-        >
-          {apiErrorDetail(error) || t('Could not load users')}
-        </Banner>
-      )}
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={users}
-        loading={isLoading}
-        rowClassName={(r) => (r.isActive ? '' : 'opacity-50')}
-        locale={{
-          emptyText: <EmptyState icon="◉" title={t('No users')} desc={t('Invite users with an invite code')} />,
-        }}
-        pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        scroll={{ x: 'max-content' }}
-      />
-
-      <ConfirmDestructive
-        open={!!deleteTarget}
-        title={t('Delete user {{email}}?', { email: deleteTarget?.email || '' })}
-        items={
-          deleteTarget
-            ? [{ key: deleteTarget.id, label: deleteTarget.email, meta: deleteTarget.role }]
-            : []
-        }
-        explanation={t('All {{count}} CF accounts, domains and templates of this user will be permanently deleted.', {
-          count: deleteTarget?.cfAccountCount ?? 0,
-        })}
-        confirmText={deleteTarget?.email || ''}
-        loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-        onCancel={() => setDeleteTarget(null)}
-      />
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)' }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <Title level={2} style={{ fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
+            {t('Users')}
+          </Title>
+          <Text type="secondary">
+            {t('Locking an account immediately invalidates its token. Deleting a user removes all their data.')}
+          </Text>
+        </div>
+        <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+          {t('Reload')}
+        </Button>
+      </div>
+      <Card>
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={users}
+          loading={isLoading}
+          pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          scroll={{ x: 'max-content' }}
+        />
+      </Card>
     </div>
   )
 }

@@ -16,23 +16,6 @@ export const cfRouter = Router();
 
 cfRouter.use(requireAuth);
 
-// In-memory cache for capability probes. Each probe makes ~6 Cloudflare reads,
-// so caching per user+account+zone absorbs rapid re-checks (spam) without
-// hammering the Cloudflare API. The "Re-check" button bypasses it via ?refresh=1.
-const CAPABILITIES_CACHE_TTL_MS = 60_000;
-const capabilitiesCache = new Map<string, { expires: number; payload: unknown }>();
-
-function capabilitiesCacheKey(userId: string, accountId?: string, label?: string, zoneId?: string): string {
-  return [userId, accountId ?? "", label ?? "", zoneId ?? ""].join("|");
-}
-
-function clearCapabilitiesCache(userId: string): void {
-  const prefix = `${userId}|`;
-  for (const key of capabilitiesCache.keys()) {
-    if (key.startsWith(prefix)) capabilitiesCache.delete(key);
-  }
-}
-
 // Zod schema shared by credential/account create endpoints
 const credentialInputSchema = z
   .object({
@@ -140,7 +123,6 @@ cfRouter.post("/credentials", async (req, res) => {
       });
     }
 
-    clearCapabilitiesCache(auth.userId);
     res.json({ success: true });
   } catch (error: any) {
     logger.error("Unexpected error in /credentials", { error: error.message, stack: error.stack });
@@ -246,17 +228,8 @@ cfRouter.get("/capabilities", async (req, res) => {
   const zoneId = req.query.zoneId as string | undefined;
   const accountId = req.query.accountId as string | undefined;
   const label = req.query.label as string | undefined;
-  const refresh = req.query.refresh === "1" || req.query.refresh === "true";
 
   try {
-    const cacheKey = capabilitiesCacheKey(auth.userId, accountId, label, zoneId);
-    if (!refresh) {
-      const hit = capabilitiesCache.get(cacheKey);
-      if (hit && hit.expires > Date.now()) {
-        return res.json(hit.payload);
-      }
-    }
-
     const credentials = await getCredentials(auth.userId, accountId, label);
     const token = {
       valid: true,
@@ -313,9 +286,7 @@ cfRouter.get("/capabilities", async (req, res) => {
       ]);
     }
 
-    const payload = { token, zone, features };
-    capabilitiesCache.set(cacheKey, { expires: Date.now() + CAPABILITIES_CACHE_TTL_MS, payload });
-    return res.json(payload);
+    return res.json({ token, zone, features });
   } catch (error) {
     return sendApiError(res, error, {
       status: 400,
@@ -391,7 +362,7 @@ cfRouter.post("/accounts", async (req, res) => {
       globalApiKeyEncrypted: encrypted,
       label: body.label,
     });
-    clearCapabilitiesCache(auth.userId);
+
     res.status(201).json({
       id: account.id,
       label: account.label,
@@ -410,32 +381,31 @@ cfRouter.post("/accounts", async (req, res) => {
   }
 });
 
-// LƯU Ý: phải đứng TRƯỚC "/accounts/:id", nếu không Express sẽ hiểu "export" là :id.
-cfRouter.get("/accounts/export", async (req, res) => {
+// Keep the literal export path before /accounts/:id so "export" is not an account ID.
+cfRouter.get(["/accounts/export", "/config/export"], async (req, res) => {
   try {
     const auth = req.auth as AuthUser;
     if (auth.role !== "admin") {
       return res.status(403).json({ detail: "Admin role required" });
     }
+    res.setHeader("Cache-Control", "no-store");
     const config = await configService.loadConfig();
 
-    // Mặc định KHÔNG xuất bcrypt hash và ciphertext credential Cloudflare:
-    // một token admin bị đánh cắp sẽ dump toàn bộ bí mật của mọi user.
-    // Bản backup đầy đủ phải yêu cầu tường minh ?includeSecrets=true.
-    const includeSecrets = req.query.includeSecrets === "true";
-    if (!includeSecrets) {
+    // Redact without mutating the source or truncating exported users/domains.
+    // A full backup requires an explicit admin opt-in.
+    if (req.query.includeSecrets !== "true") {
       return res.json({
         ...config,
-        users: config.users.map((u) => ({ ...u, passwordHash: "[REDACTED]" })),
-        accounts: config.accounts.map((a) => ({ ...a, globalApiKeyEncrypted: "[REDACTED]" })),
+        users: config.users.map((user) => ({ ...user, passwordHash: "[REDACTED]" })),
+        accounts: config.accounts.map((account) => ({ ...account, globalApiKeyEncrypted: "[REDACTED]" })),
       });
     }
 
     logger.warn("Full config export WITH secrets", { adminId: auth.userId, ip: req.ip });
-    res.json(config);
+    return res.json(config);
   } catch (error: any) {
     logger.error("Failed to export config", { error: error.message });
-    res.status(500).json({ detail: error.message || "Failed to export config" });
+    return res.status(500).json({ detail: "Failed to export config" });
   }
 });
 
@@ -508,7 +478,6 @@ cfRouter.put("/accounts/:id", async (req, res) => {
     }
 
     const updated = await configService.updateAccount(req.params.id, updates, auth.userId);
-    clearCapabilitiesCache(auth.userId);
     res.json({
       id: updated.id,
       label: updated.label,
@@ -528,7 +497,6 @@ cfRouter.delete("/accounts/:id", async (req, res) => {
     const auth = req.auth as AuthUser;
     await configService.loadConfig();
     await configService.deleteAccount(req.params.id, auth.userId);
-    clearCapabilitiesCache(auth.userId);
     res.status(204).send();
   } catch (error: any) {
     logger.error("Failed to delete account", { error: error.message });
@@ -539,7 +507,7 @@ cfRouter.delete("/accounts/:id", async (req, res) => {
   }
 });
 
-// ========== Import Endpoint (admin only — ghi đè DỮ LIỆU CỦA MỌI USER) ==========
+// ========== Import/Export Endpoints (admin only — they touch ALL users' data) ==========
 
 cfRouter.post("/accounts/import", async (req, res) => {
   try {

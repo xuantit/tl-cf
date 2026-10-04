@@ -17,6 +17,7 @@ import { api } from '../services/api'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useCommandPalette } from '../stores/useCommandPalette'
 import { useFocusMode } from '../stores/useFocusMode'
+import { useThemeStore } from '../stores/useThemeStore'
 import AppShell from './AppShell'
 
 const apiGet = vi.mocked(api.get)
@@ -49,6 +50,7 @@ describe('AppShell', () => {
     apiGet.mockResolvedValue({ data: [] })
     useCommandPalette.setState({ open: false })
     useFocusMode.setState({ active: false })
+    useThemeStore.setState({ dark: true })
   })
 
   it('renders sidebar nav items, brand and outlet content', async () => {
@@ -58,12 +60,13 @@ describe('AppShell', () => {
     expect(screen.getAllByText('CF Tool').length).toBeGreaterThanOrEqual(1)
     // Sidebar + mobile bottom nav both contain Domains / History
     expect(screen.getAllByText('Domains').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('Templates')).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Workspace navigation' })).getByText('Templates')).toBeInTheDocument()
     expect(screen.getAllByText('History').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Accounts')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cloudflare tools' })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('link', { name: /Analytics/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /Workers|Tunnels|Turnstile/ })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Workspace navigation' })).queryByRole('link', { name: /Workers|Tunnels|Turnstile/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Workspace shortcuts' })).toBeInTheDocument()
     // Admin-only items
     expect(screen.getByText('Users')).toBeInTheDocument()
     expect(screen.getByText('Audit log')).toBeInTheDocument()
@@ -91,6 +94,29 @@ describe('AppShell', () => {
     renderShell('/')
     fireEvent.click(screen.getByRole('button', { name: /Quick find/ }))
     expect(await screen.findByPlaceholderText('Type to search…')).toBeInTheDocument()
+  })
+
+  it('keeps account switching and theme controls in the shared top bar', async () => {
+    renderShell('/history')
+    await screen.findByText('history-page')
+    const topbar = screen.getByRole('banner')
+    expect(await within(topbar).findByText('No CF account')).toBeInTheDocument()
+    fireEvent.click(within(topbar).getByRole('button', { name: 'Light mode' }))
+    expect(useThemeStore.getState().dark).toBe(false)
+    fireEvent.click(within(topbar).getByRole('button', { name: 'Dark mode' }))
+    expect(useThemeStore.getState().dark).toBe(true)
+    expect(screen.queryByRole('region', { name: 'Workspace shortcuts' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#workspace-main')
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'workspace-main')
+  })
+
+  it('opens a workspace shortcut without changing its tools route', async () => {
+    renderShell('/')
+    const shortcuts = screen.getByRole('region', { name: 'Workspace shortcuts' })
+    fireEvent.click(within(shortcuts).getByRole('link', { name: /Tunnels/ }))
+    expect(await screen.findByText('tools-page')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Workspace shortcuts' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tunnels' })).toHaveAttribute('aria-current', 'page')
   })
 
   it.each(['workers', 'tunnels', 'turnstile'])('highlights the same tools navigation entry on %s', async (tool) => {
@@ -143,10 +169,12 @@ describe('AppShell', () => {
     })
     expect(aside!.className).toContain('w-0')
     expect(aside!.className).not.toContain('w-[264px]')
+    expect(aside).toHaveAttribute('inert')
 
     act(() => {
       useFocusMode.setState({ active: false })
     })
     expect(aside!.className).toContain('w-[264px]')
+    expect(aside).not.toHaveAttribute('inert')
   })
 })
