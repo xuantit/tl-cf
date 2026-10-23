@@ -23,17 +23,36 @@
   --accent: #946500;
   --accent-hover: #785100;
   --accent-soft: #fff0c4;
+  /* Theme-dependent primary fill: white on brown, dark ink on yellow. */
+  --on-primary: #ffffff;
   --accent-solid: #f4d675;
   --on-accent: #22232b;
-  --ok: #12a150;
-  --warn: #f5a524;
-  --danger: #e5484d;
-  --info: #0070f3;
+  /* Text tones retain contrast on white, app surfaces and subtle status tints. */
+  --ok: #16733e;
+  --warn: #885800;
+  --danger: #b42335;
+  --info: #175cbd;
   --off: #9aa0a6;
   --bar: #202433;
-  --hero-bg: #232839;
-  --hero-fg: #f5f6fa;
-  --hero-muted: #c0c6d6;
+  --hero-bg: #ffffff;
+  --hero-bg-end: #fafbfe;
+  --hero-glow: #fff8e6;
+  --hero-fg: #202433;
+  --hero-muted: #535e74;
+  --hero-accent: #946500;
+  --hero-border: #d8dce8;
+  --hero-grid: #20243306;
+  --hero-orbit: #94650025;
+  --hero-cloud-border: #94650070;
+  --hero-cloud-start: #9465001a;
+  --hero-cloud-end: #94650005;
+  --hero-cloud-shadow: #94650012;
+  --hero-node-bg: #ffffff;
+  --hero-node-border: #d8dce8;
+  --hero-node-fg: #38415a;
+  --hero-dns: #62449c;
+  --hero-edge: #214f99;
+  --hero-ssl: #195638;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --d1: 110ms;
@@ -55,12 +74,32 @@
   --accent: #f4d675;
   --accent-hover: #ffe5a0;
   --accent-soft: #363126;
+  --on-primary: #202433;
   --ok: #5ccea0;
   --warn: #f3c36b;
   --danger: #ff808c;
   --info: #93b6ff;
   --off: #98a1b4;
   --bar: #12141c;
+  --hero-bg: #202330;
+  --hero-bg-end: #2b334a;
+  --hero-glow: #47434c;
+  --hero-fg: #f5f6fa;
+  --hero-muted: #c0c6d6;
+  --hero-accent: #f4d675;
+  --hero-border: #3b4257;
+  --hero-grid: #ffffff04;
+  --hero-orbit: #e2d7ae25;
+  --hero-cloud-border: #f4d67570;
+  --hero-cloud-start: #f4d67536;
+  --hero-cloud-end: #f4d67508;
+  --hero-cloud-shadow: #f4d67518;
+  --hero-node-bg: #282d3d;
+  --hero-node-border: #ffffff20;
+  --hero-node-fg: #e6e9f2;
+  --hero-dns: #c2b4f4;
+  --hero-edge: #97baff;
+  --hero-ssl: #9dd6bc;
 }
 
 /* Map semantic vars into Tailwind theme (inline so .dark overrides resolve per-element) */
@@ -78,6 +117,7 @@
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+  --color-on-primary: var(--on-primary);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
@@ -210,9 +250,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }

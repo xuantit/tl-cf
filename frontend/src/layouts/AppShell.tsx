@@ -21,6 +21,7 @@ import AccountSwitcher from '../components/AccountSwitcher'
 import CommandPalette from '../components/CommandPalette'
 import NavMenuGroup from '../components/NavMenuGroup'
 import WorkspaceIntro from '../components/WorkspaceIntro'
+import ThemeToggle from '../components/ThemeToggle'
 import { Kbd } from '../components/ui'
 import { NAV_ITEMS, isNavActive } from './nav'
 
@@ -281,10 +282,7 @@ export default function AppShell() {
             <Kbd className="ml-auto">Ctrl K</Kbd>
           </button>
           <div className="console-account"><AccountSwitcher /></div>
-          <button type="button" className="console-theme-toggle" onClick={toggleTheme}
-            aria-label={dark ? t('Light mode') : t('Dark mode')} title={dark ? t('Light mode') : t('Dark mode')}>
-            {dark ? <BulbFilled /> : <BulbOutlined />}
-          </button>
+          <ThemeToggle />
         </header>
 
         {/* Main content — full-width console style */}

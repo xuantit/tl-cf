@@ -70,8 +70,38 @@ opening the non-www URL subsequently loaded the reference).
 
 ## Release status
 
-Available at **http://localhost:5199/**. **Not committed or deployed** to the public demo.
-The original test/type/lint failures have been fixed and all verification gates pass.
-The workspace still includes other existing changes: review the combined diff before
-release. No commit/deploy, HomeVietPro edits, WAF/DNS changes or production data writes
-were performed during this fix.
+UI refresh and error fixes were deployed on 2026-10-04 from user commit
+`bdeb68d2bc2d90cf8e5d918644cdfb876b478e40` to https://cf.mmthui.xyz.
+
+## Light/dark follow-up — 2026-10-05 (deployed)
+
+- Confirmed production switching/persistence worked, but the hero stayed dark in
+  light mode, status badges/auth/bulk primary colors were inconsistent, and the
+  Turnstile widget followed the OS instead of the application's selected theme.
+- Added real light hero/art colors, semantic status tints and contrast-aware primary
+  labels. AntD's resolved primary now matches CSS gold rather than desaturating it.
+  Checked controls use dark marks on gold; danger retains its own text alias.
+- Theme initialization runs before the app paints; root/body classes and native
+  color-scheme stay synchronized. Handles blocked/corrupt storage and changes in
+  other tabs. Persisted user choice still overrides the default.
+- Shared toggle is available on login/signup as well as the app header. CAPTCHA
+  remounts with explicit light/dark and invalidates the old token on theme changes.
+- Reduced-motion disables animation/transition rather than creating tiny transitions
+  on every element; no appearance/behavior changes were applied to production.
+- **275/275 frontend tests pass**, full lint/typecheck and separate Vite staging
+  build pass. Added tests for resolved color contrast, status/hero contrast, theme
+  storage/first paint/tab synchronization, and CAPTCHA token lifecycle.
+- Browser checked both modes and popup portal colors, dark/light after reload, and
+  mobile390px without overflow. Primary contrast measured 5.10:1 light / 10.81:1 dark;
+  search/table header samples above4.5:1. This is not an audit of every UI element.
+- Local embedded tab was hidden and its transitions did not advance; checked stable
+  colors with reduced motion enabled instead of mistaking frozen animation for bad tokens.
+- Deployed the theme fixes to **https://cf.mmthui.xyz/** on explicit user request.
+  Frontend-only release, built with production `/api`; 275 tests, lint and typecheck
+  rechecked successfully. Source remains uncommitted; no Git commit/push performed.
+- Verified five public routes return200 DYNAMIC, current asset manifest and seven
+  resource hashes match (including the pre-paint theme script). Browser confirms
+  light/dark palettes and saved theme after reload; restored the user's light choice.
+- Only cf-frontend restarted. Backend, tunnel, auto-deploy watcher and unrelated apps
+  unchanged. Previous frontend artifacts and source snapshot retained outside the repo
+  under the local release backup `20261005-015819-light-dark`. No WAF/DNS changes.

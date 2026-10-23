@@ -3,6 +3,7 @@ import { Alert, Button } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { loadTurnstile, type TurnstileApi } from '../lib/turnstile'
+import { useThemeStore } from '../stores/useThemeStore'
 
 export default function TurnstileChallenge({ action, generation, onToken }: {
   action: 'register' | 'verify_email'
@@ -10,6 +11,7 @@ export default function TurnstileChallenge({ action, generation, onToken }: {
   onToken: (value: string | null) => void
 }) {
   const { t } = useTranslation()
+  const dark = useThemeStore((state) => state.dark)
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
@@ -29,7 +31,7 @@ export default function TurnstileChallenge({ action, generation, onToken }: {
         widgetApi = await loadTurnstile()
         if (controller.signal.aborted || !container.current) return
         widgetId = widgetApi.render(container.current, {
-          sitekey: data.siteKey, action, theme: 'auto', size: 'flexible',
+          sitekey: data.siteKey, action, theme: dark ? 'dark' : 'light', size: 'flexible',
           callback: (token) => { if (!controller.signal.aborted) { setError(false); onToken(token) } },
           'expired-callback': fail,
           'error-callback': fail,
@@ -40,7 +42,7 @@ export default function TurnstileChallenge({ action, generation, onToken }: {
       controller.abort()
       if (widgetId && widgetApi) widgetApi.remove(widgetId)
     }
-  }, [action, generation, retry, onToken])
+  }, [action, generation, retry, onToken, dark])
   return <div className="my-3" aria-label={t('Anti-bot verification')}>
     <div ref={container} />
     {error && <Alert type="warning" showIcon title={t('Anti-bot verification unavailable or expired. Please retry.')}

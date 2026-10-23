@@ -7,11 +7,13 @@ vi.mock('../lib/turnstile', () => ({ loadTurnstile: vi.fn() }))
 import { api } from '../services/api'
 import { loadTurnstile, type TurnstileApi } from '../lib/turnstile'
 import TurnstileChallenge from './TurnstileChallenge'
+import { useThemeStore } from '../stores/useThemeStore'
 const widget = { render: vi.fn(), remove: vi.fn() }
 type Options = Parameters<TurnstileApi['render']>[1]
 let options: Options
 beforeEach(() => {
   vi.clearAllMocks()
+  useThemeStore.setState({ dark: true })
   vi.mocked(api.get).mockResolvedValue({ data: { enabled: true, siteKey: 'public-sitekey' } })
   widget.render.mockImplementation((_container, value: Options) => { options = value; return 'widget-id' })
   vi.mocked(loadTurnstile).mockResolvedValue(widget)
@@ -28,6 +30,23 @@ function Harness() {
   </>
 }
 describe('Turnstile challenge lifecycle', () => {
+  it('follows the app theme and invalidates the old token when changing theme', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(widget.render).toHaveBeenCalledTimes(1))
+    expect(options.theme).toBe('dark')
+    const previousCallback = options.callback
+    act(() => previousCallback('old-token'))
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled()
+    act(() => useThemeStore.getState().setDark(false))
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()
+    await waitFor(() => expect(widget.render).toHaveBeenCalledTimes(2))
+    expect(widget.remove).toHaveBeenCalledWith('widget-id')
+    expect(options.theme).toBe('light')
+    act(() => previousCallback('stale-token'))
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()
+    act(() => options.callback('new-token'))
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled()
+  })
   it('blocks until success, then resets token after submission', async () => {
     render(<Harness />)
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()

@@ -6,7 +6,7 @@ export type BulkActionVariant = 'default' | 'primary' | 'danger'
 const variantClasses: Record<BulkActionVariant, string> = {
   default:
     'border-white/16 bg-transparent text-white/82 hover:border-white/30 hover:bg-white/8 hover:text-white',
-  primary: 'border-accent bg-accent text-white hover:border-accent-hover hover:bg-accent-hover',
+  primary: 'border-accent bg-accent text-on-primary hover:border-accent-hover hover:bg-accent-hover',
   danger:
     'border-[rgba(255,143,143,.28)] bg-transparent text-[#ff8f8f] hover:bg-[rgba(229,72,77,.16)] hover:text-white',
 }
@@ -47,7 +47,7 @@ export default function BulkActionBar({ count, unit = 'domain', onClear, childre
 
   const countLabel = (
     <>
-      <b className="font-semibold text-accent">
+      <b className="font-semibold text-[#f4d675]">
         {count} {unit}
       </b>{' '}
       {t('selected')}

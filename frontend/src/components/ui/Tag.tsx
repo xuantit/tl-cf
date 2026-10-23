@@ -11,10 +11,10 @@ export interface TagProps {
 const variantClasses: Record<TagVariant, string> = {
   default: 'bg-bg-hover text-fg-2 border-stroke-2',
   acc: 'bg-accent-soft text-accent border-transparent',
-  ok: 'bg-[rgba(18,161,80,.09)] text-ok border-transparent',
-  warn: 'bg-[rgba(245,165,36,.12)] text-[#b46e00] border-transparent',
-  err: 'bg-[rgba(229,72,77,.09)] text-danger border-transparent',
-  info: 'bg-[rgba(0,112,243,.09)] text-info border-transparent',
+  ok: 'bg-[color-mix(in_srgb,var(--ok)_9%,var(--bg))] text-ok border-transparent',
+  warn: 'bg-[color-mix(in_srgb,var(--warn)_9%,var(--bg))] text-warn border-transparent',
+  err: 'bg-[color-mix(in_srgb,var(--danger)_9%,var(--bg))] text-danger border-transparent',
+  info: 'bg-[color-mix(in_srgb,var(--info)_9%,var(--bg))] text-info border-transparent',
 }
 
 export function Tag({ variant = 'default', children, className = '' }: TagProps) {

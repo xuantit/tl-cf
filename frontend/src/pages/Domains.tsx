@@ -249,7 +249,7 @@ export default function Domains() {
       })),
       onFilter: (value, record) => record.plan === value,
       render: (_: unknown, record: Zone) => {
-        if (!record.plan) return <span style={{ color: '#8f8f8f' }}>—</span>
+        if (!record.plan) return <span className="text-fg-3">—</span>
         const colors: Record<string, string> = { enterprise: 'gold', business: 'blue', pro: 'purple' }
         return (
           <Tag variant="filled" color={colors[record.plan] || 'default'}>
@@ -264,7 +264,7 @@ export default function Domains() {
       key: 'status',
       width: 130,
       render: (status: string) =>
-        statusDot(status === 'active' ? '#28a948' : status === 'pending' ? '#ffae00' : '#8f8f8f', status),
+        statusDot(status === 'active' ? 'var(--ok)' : status === 'pending' ? 'var(--warn)' : 'var(--fg-3)', status),
     },
     {
       title: 'SSL',
@@ -274,12 +274,12 @@ export default function Domains() {
         const sslMode = record.sslMode || record.ssl?.mode
         const sslStatus = record.ssl?.status || 'unknown'
         if (sslMode) {
-          return statusDot(sslMode !== 'off' ? '#28a948' : '#8f8f8f', sslMode)
+          return statusDot(sslMode !== 'off' ? 'var(--ok)' : 'var(--fg-3)', sslMode)
         }
         if (sslStatus !== 'unknown') {
-          return statusDot(sslStatus === 'active' ? '#28a948' : '#ffae00', sslStatus)
+          return statusDot(sslStatus === 'active' ? 'var(--ok)' : 'var(--warn)', sslStatus)
         }
-        return statusDot('#8f8f8f', 'unknown')
+        return statusDot('var(--fg-3)', 'unknown')
       },
     },
     {
@@ -371,7 +371,7 @@ export default function Domains() {
       <div className="domains-toolbar mb-4 flex flex-wrap items-center gap-2">
         <Input
           size="large"
-          prefix={<SearchOutlined style={{ color: '#8f8f8f' }} />}
+          prefix={<SearchOutlined className="text-fg-3" />}
           placeholder={t('Search domains...')}
           aria-label={t('Search domains...')}
           allowClear

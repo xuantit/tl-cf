@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/useAuthStore'
 import { Tag } from '../components/ui'
+import ThemeToggle from '../components/ThemeToggle'
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -50,11 +51,12 @@ export default function Login() {
     <div className="grid min-h-screen place-items-center bg-bg-app p-5">
       <div className="fade-in w-[340px] max-w-full rounded-xl border border-solid border-stroke bg-bg p-[26px_24px] shadow-[0_8px_30px_-12px_rgb(0_0_0/.12)]">
         <div className="mb-5 flex items-center gap-2">
-          <div className="grid h-6 w-6 flex-none place-items-center rounded-[6px] bg-accent text-[13px] text-white">
+          <div className="grid h-6 w-6 flex-none place-items-center rounded-[6px] bg-accent text-[13px] text-on-primary">
             ☁
           </div>
           <div className="font-mono text-[13px] font-semibold text-fg">CF Tool</div>
           <Tag className="ml-auto">v2</Tag>
+          <ThemeToggle />
         </div>
         <div className="text-[15px] font-semibold tracking-[-.02em] text-fg">{t('Sign In')}</div>
         <div className="mt-[3px] mb-[18px] font-mono text-[11.5px] text-fg-3">
